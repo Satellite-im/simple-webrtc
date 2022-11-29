@@ -1,16 +1,22 @@
 use anyhow::{bail, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
 use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
+use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::RTCPeerConnection;
 
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use webrtc::rtp;
+use webrtc::rtp_transceiver::rtp_receiver::RTCRtpReceiver;
+use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
+use webrtc::track::track_remote::TrackRemote;
 
 mod internal;
 
@@ -41,16 +47,14 @@ extern crate lazy_static;
 
 pub struct Controller {
     api: webrtc::api::API,
+    /// client's id
     id: PeerId,
-    /// store a PeerConnection for updating SDP and ICE candidates, adding and removing tracks
+    /// list of peers
     peers: HashMap<PeerId, Peer>,
-    // todo: store outgoing media tracks so that if local tracks are removed and re-added, the
-    // remote tracks don't get lost
-    // outgoing_media_tracks: HashMap<TrackKey, Arc<TrackLocalStaticRTP>>,
-    /// used to control media_workers
-    media_workers: HashMap<MediaSource, mpsc::UnboundedSender<()>>,
     /// used to emit events
     emitted_event_chan: mpsc::UnboundedSender<EmittedEvents>,
+    /// used to control the threads which receive RTP packets from the user
+    media_worker_channels: MediaWorkerChannels,
 }
 
 // a lazy version of the builder pattern
@@ -69,27 +73,126 @@ pub struct InitArgs {
 /// The following functions are driven by signaling
 /// recv_ice
 /// recv_sdp
-/// call_initiated
-/// call_terminated
-/// call_rejected
 impl Controller {
-    pub fn init(args: InitArgs) -> Result<Self> {
-        Ok(Self {
-            api: create_api()?,
-            id: args.id,
-            peers: HashMap::new(),
-            media_workers: HashMap::new(),
-            emitted_event_chan: args.emitted_event_chan,
-        })
+    // hey look it's a 70+ line constructor
+    pub fn init(args: InitArgs) -> Result<(Self, MediaWorkerInputs)> {
+        // create channels used to exchange RTP packets
+        let (camera_tx, camera_rx) = mpsc::unbounded_channel::<rtp::packet::Packet>();
+        let (microphone_tx, microphone_rx) = mpsc::unbounded_channel::<rtp::packet::Packet>();
+        let (screen_tx, screen_rx) = mpsc::unbounded_channel::<rtp::packet::Packet>();
+
+        // this will be returned to the user
+        let media_worker_inputs = MediaWorkerInputs {
+            camera_tx,
+            microphone_tx,
+            screen_tx,
+        };
+
+        // create channels to control the media workers
+        let (camera_worker_tx, camera_worker_rx) = mpsc::unbounded_channel::<MediaWorkerCommands>();
+        let (microphone_worker_tx, microphone_worker_rx) =
+            mpsc::unbounded_channel::<MediaWorkerCommands>();
+        let (screen_worker_tx, screen_worker_rx) = mpsc::unbounded_channel::<MediaWorkerCommands>();
+
+        let media_worker_channels = MediaWorkerChannels {
+            camera: camera_worker_tx,
+            microphone: microphone_worker_tx,
+            screen: screen_worker_tx,
+        };
+
+        // spawn media workers
+        tokio::spawn(async move {
+            let mut worker = MediaWorker {
+                control_rx: camera_worker_rx,
+                media_rx: camera_rx,
+                outgoing_media_tracks: HashMap::new(),
+            };
+            worker.run().await;
+        });
+
+        tokio::spawn(async move {
+            let mut worker = MediaWorker {
+                control_rx: microphone_worker_rx,
+                media_rx: microphone_rx,
+                outgoing_media_tracks: HashMap::new(),
+            };
+            worker.run().await;
+        });
+
+        tokio::spawn(async move {
+            let mut worker = MediaWorker {
+                control_rx: screen_worker_rx,
+                media_rx: screen_rx,
+                outgoing_media_tracks: HashMap::new(),
+            };
+            worker.run().await;
+        });
+
+        Ok((
+            Self {
+                api: create_api()?,
+                id: args.id,
+                peers: HashMap::new(),
+                media_worker_channels,
+                emitted_event_chan: args.emitted_event_chan,
+            },
+            media_worker_inputs,
+        ))
     }
     /// creates a RTCPeerConnection, sets the local SDP object, emits a CallInitiatedEvent,
     /// which contains the SDP object
     /// continues with the following signals: Sdp, CallTerminated, CallRejected
-    pub fn dial(&self) {}
+    pub async fn dial(&mut self, peer: PeerId) -> Result<()> {
+        let pc = self.connect(peer.clone()).await?;
+        let local_sdp = pc.create_offer(None).await?;
+        // Sets the LocalDescription, and starts our UDP listeners
+        // Note: this will start the gathering of ICE candidates
+        pc.set_local_description(local_sdp.clone()).await?;
+
+        self.emitted_event_chan.send(EmittedEvents::Sdp {
+            dest: peer,
+            sdp: local_sdp,
+        })?;
+
+        Ok(())
+    }
     /// adds the remote sdp, sets own sdp, and sends own sdp to remote
-    pub fn accept_call(&self) {}
+    pub async fn accept_call(
+        &mut self,
+        peer: PeerId,
+        remote_sdp: RTCSessionDescription,
+    ) -> Result<()> {
+        let pc = self.connect(peer.clone()).await?;
+        if let Err(e) = pc.set_remote_description(remote_sdp).await {
+            log::error!("failed to set remote description: {:?}", e);
+            return Err(e.into());
+        }
+
+        let answer = pc.create_answer(None).await?;
+        pc.set_local_description(answer.clone()).await?;
+
+        if let Some(p) = self.peers.get_mut(&peer) {
+            p.state = PeerState::WaitingForIce;
+        } else {
+            bail!("peer not found");
+        }
+
+        self.emitted_event_chan.send(EmittedEvents::Sdp {
+            dest: peer,
+            sdp: answer,
+        })?;
+
+        Ok(())
+    }
     /// Removes the RTCPeerConnection
-    pub fn hang_up(&self) {}
+    /// the controlling application sould send a HangUp signal to the remote side
+    pub fn hang_up(&mut self, peer: PeerId) {
+        // todo: tell MediaWorker to drop channels associated with Peer
+
+        if let None = self.peers.remove(&peer) {
+            log::info!("called hang_up for non-connected peer");
+        }
+    }
     /// spawns a MediaWorker to capture media and write to registered TrackLocalStaticRTP
     /// adds tracks to the RTCPeerConnection and sends them to the MediaWorker
     pub fn add_track(&self) {}
@@ -121,13 +224,11 @@ impl Controller {
 
         Ok(())
     }
-    pub fn call_initiated(&self) {}
-    pub fn call_terminated(&self) {}
-    pub fn call_rejected(&self) {}
 
     /// adds a connection. called by dial and accept_call
     /// inserts the connection into self.peers
-    async fn connect(&mut self, peer: PeerId) -> Result<()> {
+    /// initializes state to WaitingForSdp
+    async fn connect(&mut self, peer: PeerId) -> Result<Arc<RTCPeerConnection>> {
         // todo: ensure id is not in self.connections
 
         let config = RTCConfiguration {
@@ -149,15 +250,81 @@ impl Controller {
                 peer.clone(),
                 Peer {
                     state: PeerState::WaitingForSdp,
-                    id: peer,
-                    connection: peer_connection,
+                    id: peer.clone(),
+                    connection: peer_connection.clone(),
+                    tracks: HashMap::new(),
                 },
             )
             .is_some()
         {
             log::warn!("overwriting peer connection");
         }
-        Ok(())
+
+        // configure callbacks
+
+        // send discovered ice candidates (for self) to remote peer
+        // the next 2 lines is some nonsense to satisfy the (otherwise excellent) rust compiler
+        let tx = self.emitted_event_chan.clone();
+        let dest = peer.clone();
+        peer_connection.on_ice_candidate(Box::new(move |c: Option<RTCIceCandidate>| {
+            let tx = tx.clone();
+            let dest = dest.clone();
+            Box::pin(async move {
+                if let Some(candidate) = c {
+                    if let Err(e) = tx.send(EmittedEvents::Ice {
+                        dest: dest.clone(),
+                        candidate,
+                    }) {
+                        log::error!("failed to send ice candidate to peer {}: {}", &dest, e);
+                    }
+                }
+            })
+        }));
+
+        // Set the handler for ICE connection state
+        // This will notify you when the peer has connected/disconnected
+        // the next 2 lines is some nonsense to satisfy the (otherwise excellent) rust compiler
+        let tx = self.emitted_event_chan.clone();
+        let dest = peer.clone();
+        peer_connection.on_ice_connection_state_change(Box::new(
+            move |connection_state: RTCIceConnectionState| {
+                let tx = tx.clone();
+                let dest = dest.clone();
+                log::info!(
+                    "Connection State for peer {} has changed {}",
+                    &dest,
+                    connection_state
+                );
+                if connection_state == RTCIceConnectionState::Failed {
+                    if let Err(e) = tx.send(EmittedEvents::Disconnected { peer: dest.clone() }) {
+                        log::error!("failed to send disconnect event for peer {}: {}", &dest, e);
+                    }
+                }
+                Box::pin(async {})
+            },
+        ));
+
+        // store media tracks when created
+        // the next 2 lines is some nonsense to satisfy the (otherwise excellent) rust compiler
+        let tx = self.emitted_event_chan.clone();
+        let dest = peer.clone();
+        peer_connection.on_track(Box::new(
+            move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
+                let tx = tx.clone();
+                let dest = dest.clone();
+                if let Some(track) = track {
+                    if let Err(e) = tx.send(EmittedEvents::TrackAdded {
+                        peer: dest.clone(),
+                        track: track.clone(),
+                    }) {
+                        log::error!("failed to send track added event for peer {}: {}", &dest, e);
+                    }
+                }
+                Box::pin(async {})
+            },
+        ));
+
+        Ok(peer_connection)
     }
 
     /// terminates a connection

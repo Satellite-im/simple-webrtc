@@ -16,7 +16,6 @@ pub enum MediaSource {
     Screen,
 }
 
-
 /// represents the MIME types from webrtc::api::media_engine
 #[derive(Serialize, Deserialize)]
 pub enum MimeType {
@@ -72,7 +71,7 @@ impl ToString for MimeType {
 }
 
 impl MimeType {
-    pub fn from_str(s: &str) -> Result<Self> {
+    pub fn from_string(s: &str) -> Result<Self> {
         let mime_type = match s {
             MIME_TYPE_H264 => MimeType::H264,
             MIME_TYPE_VP8 => MimeType::VP8,

@@ -1,27 +1,24 @@
 use anyhow::{bail, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc};
-use webrtc::api::APIBuilder;
+use tokio::sync::mpsc;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
+use webrtc::api::APIBuilder;
 use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::RTCPeerConnection;
+
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use webrtc::rtp;
-use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
 mod internal;
-use crate::internal::media::*;
-use crate::internal::events::*;
+
 use crate::internal::data_types::*;
+use crate::internal::events::*;
 
 // public exports
 pub use internal::media::*;
-
 
 #[cfg(feature = "test-server")]
 mod testing;
@@ -31,7 +28,6 @@ pub use testing::signaling_server;
 #[cfg(feature = "test-server")]
 #[macro_use]
 extern crate lazy_static;
-
 
 /// simple-webrtc
 /// This library augments the [webrtc-rs](https://github.com/webrtc-rs/webrtc) library, hopefully
@@ -90,7 +86,6 @@ impl Controller {
             peers: HashMap::new(),
             media_workers: HashMap::new(),
             emitted_event_chan: args.emitted_event_chan,
-
         })
     }
     /// creates a RTCPeerConnection, sets the local SDP object, emits a CallInitiatedEvent,
@@ -110,10 +105,11 @@ impl Controller {
     pub async fn recv_ice(&self, peer: PeerId, candidate: RTCIceCandidate) -> Result<()> {
         if let Some(peer) = self.peers.get(&peer) {
             let candidate = candidate.to_json()?.candidate;
-            peer.connection.add_ice_candidate(RTCIceCandidateInit {
-                candidate,
-                ..Default::default()
-            })
+            peer.connection
+                .add_ice_candidate(RTCIceCandidateInit {
+                    candidate,
+                    ..Default::default()
+                })
                 .await?;
         } else {
             bail!("peer not found");
@@ -155,11 +151,14 @@ impl Controller {
         let peer_connection = Arc::new(self.api.new_peer_connection(config).await?);
         if self
             .peers
-            .insert(peer.clone(), Peer {
-                state: PeerState::WaitingForSdp,
-                id: peer,
-                connection: peer_connection
-            })
+            .insert(
+                peer.clone(),
+                Peer {
+                    state: PeerState::WaitingForSdp,
+                    id: peer,
+                    connection: peer_connection,
+                },
+            )
             .is_some()
         {
             log::warn!("overwriting peer connection");

@@ -1,11 +1,10 @@
-
 /// peer-to-peer signals - can be sent or received
 pub enum PeerSignals {
     Ice,
     Sdp,
     CallInitiated,
     CallTerminated,
-    CallRejected
+    CallRejected,
 }
 
 pub enum EmittedEvents {

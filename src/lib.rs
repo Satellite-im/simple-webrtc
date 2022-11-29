@@ -39,12 +39,6 @@ extern crate lazy_static;
 /// WebRTC requires out of band signalling. The `SimpleWebRtc` accepts a callback for transmitting
 /// signals and a channel for receiving signals.
 
-/// Managing the WebRTC connections requires simultaneously monitoring multiple channels. Rust
-/// doesn't allow multiple mutable references so it seems too much trouble to use one struct
-/// to both poll channels and provide an API which provides mutator methods. Instead, let an
-/// external API provide the nice convenient methods a user would like and then behind the
-/// scenes communicate with a background thread via channels.
-
 pub struct Controller {
     api: webrtc::api::API,
     id: PeerId,

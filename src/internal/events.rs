@@ -5,24 +5,24 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_remote::TrackRemote;
 
-/// peer-to-peer signals - can be sent or received
-pub enum PeerSignals {
-    Ice,
-    Sdp,
-    CallInitiated,
-    CallTerminated,
-    CallRejected,
-}
+// peer-to-peer signals - can be sent or received
+// pub enum PeerSignals {
+//     Ice,
+//     Sdp,
+//     CallInitiated,
+//     CallTerminated,
+//     CallRejected,
+// }
 
 #[derive(Debug)]
 pub enum EmittedEvents {
     Ice {
         dest: PeerId,
-        candidate: RTCIceCandidate,
+        candidate: Box<RTCIceCandidate>,
     },
     Sdp {
         dest: PeerId,
-        sdp: RTCSessionDescription,
+        sdp: Box<RTCSessionDescription>,
     },
     /// unless a CallTerminated event was received, results in a reconnect
     /// needs to be handled by the developer

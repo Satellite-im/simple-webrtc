@@ -27,8 +27,13 @@ pub struct Peer {
 }
 
 pub enum MediaWorkerCommands {
-    AddTrack,
-    RemoveTrack,
+    AddTrack {
+        peer: PeerId,
+        track: Arc<TrackLocalStaticRTP>,
+    },
+    RemoveTrack {
+        peer: PeerId,
+    },
     Terminate,
 }
 
@@ -67,14 +72,28 @@ impl MediaWorker {
             tokio::select! {
                 cmd = self.control_rx.recv() => match cmd {
                   Some(cmd) => match cmd {
-                        MediaWorkerCommands::AddTrack => todo!(),
-                        MediaWorkerCommands::RemoveTrack => todo!(),
+                        MediaWorkerCommands::AddTrack{
+                            peer,
+                            track
+                        } => {
+                            if self.outgoing_media_tracks.insert(peer.clone(), track).is_some() {
+                                log::info!("overwriting media track for peer {}", peer);
+                            }
+                        },
+                        MediaWorkerCommands::RemoveTrack{ peer } => {
+                            if self.outgoing_media_tracks.remove(&peer).is_none() {
+                                log::info!("removed nonexistent media track for peer: {}", &peer);
+                            }
+                        },
                         MediaWorkerCommands::Terminate => return,
                     }
                     None => return
                 },
                 packet = self.media_rx.recv() => {
-                    todo!()
+                    for track in &self.outgoing_media_tracks {
+                        // todo: clone and send packet
+                        todo!()
+                    }
                 }
             }
         }

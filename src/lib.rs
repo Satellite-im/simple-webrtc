@@ -151,7 +151,7 @@ impl Controller {
 
         self.emitted_event_chan.send(EmittedEvents::Sdp {
             dest: peer,
-            sdp: local_sdp,
+            sdp: Box::new(local_sdp),
         })?;
 
         Ok(())
@@ -179,7 +179,7 @@ impl Controller {
 
         self.emitted_event_chan.send(EmittedEvents::Sdp {
             dest: peer,
-            sdp: answer,
+            sdp: Box::new(answer),
         })?;
 
         Ok(())
@@ -189,7 +189,7 @@ impl Controller {
     pub fn hang_up(&mut self, peer: PeerId) {
         // todo: tell MediaWorker to drop channels associated with Peer
 
-        if let None = self.peers.remove(&peer) {
+        if self.peers.remove(&peer).is_none() {
             log::info!("called hang_up for non-connected peer");
         }
     }
@@ -273,7 +273,7 @@ impl Controller {
                 if let Some(candidate) = c {
                     if let Err(e) = tx.send(EmittedEvents::Ice {
                         dest: dest.clone(),
-                        candidate,
+                        candidate: Box::new(candidate),
                     }) {
                         log::error!("failed to send ice candidate to peer {}: {}", &dest, e);
                     }
@@ -315,7 +315,7 @@ impl Controller {
                 if let Some(track) = track {
                     if let Err(e) = tx.send(EmittedEvents::TrackAdded {
                         peer: dest.clone(),
-                        track: track.clone(),
+                        track,
                     }) {
                         log::error!("failed to send track added event for peer {}: {}", &dest, e);
                     }

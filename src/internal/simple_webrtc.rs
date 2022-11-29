@@ -9,16 +9,16 @@ use webrtc::api::APIBuilder;
 use webrtc::interceptor::registry::Registry;
 
 use crate::MimeType;
+use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
+use webrtc::ice_transport::ice_server::RTCIceServer;
+use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::rtp_transceiver::rtp_receiver::RTCRtpReceiver;
 use webrtc::{
     peer_connection::RTCPeerConnection,
     rtp,
     track::{track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote},
 };
-use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
-use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
 /// simple-webrtc-internal
 
@@ -39,34 +39,68 @@ pub struct TrackDescription {
     track_id: String,
     media_source: MediaSource,
     mime_type: MimeType,
-    peer_id: String,
+    peer_id: PeerId,
 }
 
 /// Used to configure and control the WebRTC connection
 /// These signals are exchanged with the peer
 pub enum PeerSignal {
     /// Initiates a connection
-    Connect,
+    /// the client will create a RTCPeerConnection and associate it with the peer ID
+    /// the client will create a SDP object and set the local SDP for the associated connection
+    /// the client will send this SDP object with the connect request
+    Connect {
+        peer_id: PeerId,
+        sdp: RTCSessionDescription,
+    },
+    /// rejects a connection
+    /// if a client's "connect" signal is rejected, the corresponding RTCPeerConnection is
+    /// deleted
+    Reject { peer_id: PeerId },
     /// terminates a connection
-    Disconnect,
+    Disconnect { peer_id: PeerId },
     /// Shares an ICE candidate
     /// Requried by webrtc-rs
-    IceCandidate,
+    IceCandidate {
+        peer_id: PeerId,
+        candidate: RTCIceCandidate,
+    },
     /// Sends the Session Description Protocol object
-    Sdp,
+    Sdp {
+        peer_id: PeerId,
+        sdp: RTCSessionDescription,
+    },
     /// Add a media track (audio or video)
-    AddTrack,
+    AddTrack { description: TrackDescription },
     /// remove a media track
-    RemoveTrack,
+    RemoveTrack { peer_id: PeerId, track_id: String },
+}
+
+/// Used by the client to communicate with the controlling process
+pub enum EventSignal {
+    /// triggered when the client receives an ICE candidate during ICE discovery.
+    /// This candidate needs to be sent to the peer
+    IceCandidate {
+        candidate: RTCIceCandidate,
+        dest_peer: PeerId,
+    },
+    /// reply with Client's SDP. used when accepting a connection
+    Sdp {
+        sdp: RTCSessionDescription,
+        dest_peer: PeerId,
+    },
+    /// triggered when ICE discovery fails or if the connection is dropped or terminated.
+    /// if a Disconnect signal wasn't received, the client should attempt to reconnect, starting
+    /// with ICE discovery
+    ConnectionFailed { dest_peer: PeerId },
 }
 
 // the keys from outgoing_media_tracks correspond to the keys from local_media_tracks
 pub struct SimpleWebRtc {
     api: webrtc::api::API,
     client_id: PeerId,
-    /// transmits a signal out of band
-    /// using a channel here rather than a FnMut because a FnMut isn't Send
-    send_signal: mpsc::UnboundedSender<PeerSignal>,
+    /// used by the client to communicate with the controlling process
+    event_signal_chan: mpsc::UnboundedSender<EventSignal>,
     /// receives incoming signals
     incoming_signal_chan: mpsc::UnboundedReceiver<PeerSignal>,
     /// when the remote side creates a track (for sending), pass it here
@@ -85,7 +119,7 @@ pub type PeerId = String;
 // don't want track names to collide - combine with the peer_id
 pub struct TrackKey {
     pub peer_id: PeerId,
-    pub track_name: String
+    pub track_name: String,
 }
 
 pub struct TrackOpened {
@@ -96,7 +130,7 @@ pub struct TrackOpened {
 pub struct SimpleWebRtcInit {
     pub client_id: PeerId,
     pub incoming_media_chan: mpsc::UnboundedSender<TrackOpened>,
-    pub send_signal: mpsc::UnboundedSender<PeerSignal>,
+    pub event_signal_chan: mpsc::UnboundedSender<EventSignal>,
     pub incoming_signal_chan: mpsc::UnboundedReceiver<PeerSignal>,
 }
 
@@ -105,7 +139,7 @@ impl SimpleWebRtc {
         Ok(Self {
             api: Self::create_api()?,
             client_id: args.client_id,
-            send_signal: args.send_signal,
+            event_signal_chan: args.event_signal_chan,
             incoming_signal_chan: args.incoming_signal_chan,
             incoming_media_chan: args.incoming_media_chan,
             connections: HashMap::new(),
@@ -115,7 +149,7 @@ impl SimpleWebRtc {
     }
 
     /// Initiates a connection
-    pub async fn connect(&mut self, peer: &PeerId) -> Result<()>{
+    pub async fn connect(&mut self, peer: &PeerId) -> Result<()> {
         // todo: ensure id is not in self.connections
 
         let config = RTCConfiguration {
@@ -131,7 +165,11 @@ impl SimpleWebRtc {
 
         // Create a new RTCPeerConnection
         let peer_connection = Arc::new(self.api.new_peer_connection(config).await?);
-        if self.connections.insert(peer.clone(), peer_connection).is_some() {
+        if self
+            .connections
+            .insert(peer.clone(), peer_connection)
+            .is_some()
+        {
             log::warn!("overwriting peer connection");
         }
         Ok(())
@@ -146,23 +184,28 @@ impl SimpleWebRtc {
     }
 
     /// Tells the client of a possible address which may be used to connect to the remote side
-    pub async fn recv_ice_candidate(&self, peer: &PeerId, candidate: RTCIceCandidate) -> Result<()>{
-         if let Some(pc)  = self.connections.get(peer) {
-             let candidate = candidate.to_json()?.candidate;
+    pub async fn recv_ice_candidate(
+        &self,
+        peer: &PeerId,
+        candidate: RTCIceCandidate,
+    ) -> Result<()> {
+        if let Some(pc) = self.connections.get(peer) {
+            let candidate = candidate.to_json()?.candidate;
             pc.add_ice_candidate(RTCIceCandidateInit {
                 candidate,
                 ..Default::default()
-            }).await?;
+            })
+            .await?;
         } else {
-             bail!("peer not found");
-         }
+            bail!("peer not found");
+        }
 
         Ok(())
     }
 
     /// pass the sdp of the remote side to the client
     pub async fn recv_sdp(&self, peer: &PeerId, sdp: RTCSessionDescription) -> Result<()> {
-        if let Some(pc)  = self.connections.get(peer) {
+        if let Some(pc) = self.connections.get(peer) {
             pc.set_remote_description(sdp).await?;
         } else {
             bail!("peer not found");

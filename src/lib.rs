@@ -87,10 +87,11 @@ impl SimpleWebRtc {
     /// receive an ICE candidate from the remote side
     pub async fn recv_ice_candidate(&self, peer: PeerId, candidate: RTCIceCandidate) {
         let (tx, rx) = oneshot::channel::<GenericResponse>();
-        if let Err(_e) = self
-            .control_channel
-            .send(InternalCmd::IceCandidate { peer, candidate, response: tx })
-        {
+        if let Err(_e) = self.control_channel.send(InternalCmd::IceCandidate {
+            peer,
+            candidate,
+            response: tx,
+        }) {
             todo!();
         }
 
@@ -100,12 +101,13 @@ impl SimpleWebRtc {
         }
     }
     /// receive an SDP object from the remote side
-    pub async fn recv_sdp(&self, peer: PeerId, sdp: RTCSessionDescription){
+    pub async fn recv_sdp(&self, peer: PeerId, sdp: RTCSessionDescription) {
         let (tx, rx) = oneshot::channel::<GenericResponse>();
-        if let Err(_e) = self
-            .control_channel
-            .send(InternalCmd::Sdp { peer, sdp, response: tx })
-        {
+        if let Err(_e) = self.control_channel.send(InternalCmd::Sdp {
+            peer,
+            sdp,
+            response: tx,
+        }) {
             todo!();
         }
 

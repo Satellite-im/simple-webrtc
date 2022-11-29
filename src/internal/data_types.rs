@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{mpsc};
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
@@ -89,8 +89,8 @@ impl MediaWorker {
                     }
                     None => return
                 },
-                packet = self.media_rx.recv() => {
-                    for track in &self.outgoing_media_tracks {
+                _packet = self.media_rx.recv() => {
+                    for _track in &self.outgoing_media_tracks {
                         // todo: clone and send packet
                         todo!()
                     }

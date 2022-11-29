@@ -2,7 +2,7 @@ use crate::internal::data_types::PeerId;
 use std::sync::Arc;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
+
 use webrtc::track::track_remote::TrackRemote;
 
 // peer-to-peer signals - can be sent or received

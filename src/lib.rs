@@ -1,15 +1,27 @@
-use tokio::sync::{broadcast, mpsc, oneshot};
-use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
+use anyhow::{bail, Result};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{broadcast, mpsc};
+use webrtc::api::APIBuilder;
+use webrtc::api::interceptor_registry::register_default_interceptors;
+use webrtc::api::media_engine::MediaEngine;
+use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
+use webrtc::ice_transport::ice_server::RTCIceServer;
+use webrtc::interceptor::registry::Registry;
+use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::rtp;
+use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
 mod internal;
-use internal::background_thread::GenericResponse;
-use internal::background_thread::InternalCmd;
+use crate::internal::media::*;
+use crate::internal::events::*;
+use crate::internal::data_types::*;
 
 // public exports
-pub use internal::mime_type::*;
-pub use internal::simple_webrtc::{MediaSource, PeerId, PeerSignal, SimpleWebRtcInit, TrackOpened};
+pub use internal::media::*;
+
 
 #[cfg(feature = "test-server")]
 mod testing;
@@ -19,6 +31,7 @@ pub use testing::signaling_server;
 #[cfg(feature = "test-server")]
 #[macro_use]
 extern crate lazy_static;
+
 
 /// simple-webrtc
 /// This library augments the [webrtc-rs](https://github.com/webrtc-rs/webrtc) library, hopefully
@@ -35,120 +48,152 @@ extern crate lazy_static;
 /// to both poll channels and provide an API which provides mutator methods. Instead, let an
 /// external API provide the nice convenient methods a user would like and then behind the
 /// scenes communicate with a background thread via channels.
-pub struct SimpleWebRtc {
-    /// controls the thread running simple_webrtc
-    control_channel: mpsc::UnboundedSender<InternalCmd>,
-    /// receives incoming signals
-    incoming_signal_chan: mpsc::UnboundedReceiver<PeerSignal>,
+
+pub struct Controller {
+    api: webrtc::api::API,
+    id: PeerId,
+    /// store a PeerConnection for updating SDP and ICE candidates, adding and removing tracks
+    peers: HashMap<PeerId, Peer>,
+    // todo: store outgoing media tracks so that if local tracks are removed and re-added, the
+    // remote tracks don't get lost
+    // outgoing_media_tracks: HashMap<TrackKey, Arc<TrackLocalStaticRTP>>,
+    /// used to control media_workers
+    media_workers: HashMap<MediaSource, mpsc::UnboundedSender<()>>,
+    /// used to emit events
+    emitted_event_chan: mpsc::UnboundedSender<EmittedEvents>,
 }
 
-impl SimpleWebRtc {
-    pub async fn init(args: SimpleWebRtcInit) -> Self {
-        let (tx, rx) = mpsc::unbounded_channel::<InternalCmd>();
+// a lazy version of the builder pattern
+pub struct InitArgs {
+    pub id: PeerId,
+    pub emitted_event_chan: mpsc::UnboundedSender<EmittedEvents>,
+}
 
-        tokio::spawn(async move {
-            internal::background_thread::run(args, rx).await;
-        });
+/// The following functions are driven by the UI:
+/// dial
+/// accept_call
+/// hang_up
+/// add_track
+/// remove_track
+///
+/// The following functions are driven by signaling
+/// recv_ice
+/// recv_sdp
+/// call_initiated
+/// call_terminated
+/// call_rejected
+impl Controller {
+    pub fn init(args: InitArgs) -> Result<Self> {
+        Ok(Self {
+            api: create_api()?,
+            id: args.id,
+            peers: HashMap::new(),
+            media_workers: HashMap::new(),
+            emitted_event_chan: args.emitted_event_chan,
 
-        Self {
-            control_channel: tx,
-        }
+        })
     }
-
-    /// Initiates a connection
-    pub async fn connect(&self, peer: PeerId) {
-        let (tx, rx) = oneshot::channel::<GenericResponse>();
-        if let Err(_e) = self
-            .control_channel
-            .send(InternalCmd::Connect { peer, response: tx })
-        {
-            todo!();
-        }
-
-        match rx.await {
-            Ok(_r) => todo!(),
-            Err(_e) => todo!(),
-        }
-    }
-    /// terminates a connection
-    pub async fn disconnect(&self, peer: PeerId) {
-        let (tx, rx) = oneshot::channel::<GenericResponse>();
-        if let Err(_e) = self
-            .control_channel
-            .send(InternalCmd::Disconnect { peer, response: tx })
-        {
-            todo!();
-        }
-
-        match rx.await {
-            Ok(_r) => todo!(),
-            Err(_e) => todo!(),
-        }
-    }
+    /// creates a RTCPeerConnection, sets the local SDP object, emits a CallInitiatedEvent,
+    /// which contains the SDP object
+    /// continues with the following signals: Sdp, CallTerminated, CallRejected
+    pub fn dial(&self) {}
+    /// adds the remote sdp, sets own sdp, and sends own sdp to remote
+    pub fn accept_call(&self) {}
+    /// Removes the RTCPeerConnection
+    pub fn hang_up(&self) {}
+    /// spawns a MediaWorker to capture media and write to registered TrackLocalStaticRTP
+    /// adds tracks to the RTCPeerConnection and sends them to the MediaWorker
+    pub fn add_track(&self) {}
+    /// removes tracks from the RTCPeerConnection and closes the MediaWorker
+    pub fn remove_track(&self) {}
     /// receive an ICE candidate from the remote side
-    pub async fn recv_ice_candidate(&self, peer: PeerId, candidate: RTCIceCandidate) {
-        let (tx, rx) = oneshot::channel::<GenericResponse>();
-        if let Err(_e) = self.control_channel.send(InternalCmd::IceCandidate {
-            peer,
-            candidate,
-            response: tx,
-        }) {
-            todo!();
+    pub async fn recv_ice(&self, peer: PeerId, candidate: RTCIceCandidate) -> Result<()> {
+        if let Some(peer) = self.peers.get(&peer) {
+            let candidate = candidate.to_json()?.candidate;
+            peer.connection.add_ice_candidate(RTCIceCandidateInit {
+                candidate,
+                ..Default::default()
+            })
+                .await?;
+        } else {
+            bail!("peer not found");
         }
 
-        match rx.await {
-            Ok(_r) => todo!(),
-            Err(_e) => todo!(),
-        }
+        Ok(())
     }
     /// receive an SDP object from the remote side
-    pub async fn recv_sdp(&self, peer: PeerId, sdp: RTCSessionDescription) {
-        let (tx, rx) = oneshot::channel::<GenericResponse>();
-        if let Err(_e) = self.control_channel.send(InternalCmd::Sdp {
-            peer,
-            sdp,
-            response: tx,
-        }) {
-            todo!();
+    pub async fn recv_sdp(&self, peer: PeerId, sdp: RTCSessionDescription) -> Result<()> {
+        if let Some(peer) = self.peers.get(&peer) {
+            peer.connection.set_remote_description(sdp).await?;
+        } else {
+            bail!("peer not found");
         }
 
-        match rx.await {
-            Ok(_r) => todo!(),
-            Err(_e) => todo!(),
-        }
+        Ok(())
     }
-    /// Add a media track (audio or video)
-    /// Registers a media source, stored in `local_media_tracks`
-    /// when a peer connects, a corresponding connection is automatically created in
-    /// `outgoing_media_tracks`.
-    pub async fn add_track(&self, id: &str, source: broadcast::Receiver<rtp::packet::Packet>) {
-        let (tx, rx) = oneshot::channel::<GenericResponse>();
-        if let Err(_e) = self.control_channel.send(InternalCmd::AddTrack {
-            id: id.into(),
-            source,
-            response: tx,
-        }) {
-            todo!();
-        }
+    pub fn call_initiated(&self) {}
+    pub fn call_terminated(&self) {}
+    pub fn call_rejected(&self) {}
 
-        match rx.await {
-            Ok(_r) => todo!(),
-            Err(_e) => todo!(),
-        }
-    }
-    /// remove a media track
-    pub async fn remove_track(&self, id: &str) {
-        let (tx, rx) = oneshot::channel::<GenericResponse>();
-        if let Err(_e) = self.control_channel.send(InternalCmd::RemoveTrack {
-            id: id.into(),
-            response: tx,
-        }) {
-            todo!();
-        }
+    /// adds a connection. called by dial and accept_call
+    /// inserts the connection into self.peers
+    async fn connect(&mut self, peer: PeerId) -> Result<()> {
+        // todo: ensure id is not in self.connections
 
-        match rx.await {
-            Ok(_r) => todo!(),
-            Err(_e) => todo!(),
+        let config = RTCConfiguration {
+            ice_servers: vec![RTCIceServer {
+                urls: vec![
+                    "stun:stun.services.mozilla.com:3478".into(),
+                    "stun:stun.l.google.com:19302".into(),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        // Create a new RTCPeerConnection
+        let peer_connection = Arc::new(self.api.new_peer_connection(config).await?);
+        if self
+            .peers
+            .insert(peer.clone(), Peer {
+                state: PeerState::WaitingForSdp,
+                id: peer,
+                connection: peer_connection
+            })
+            .is_some()
+        {
+            log::warn!("overwriting peer connection");
         }
+        Ok(())
     }
+
+    /// terminates a connection
+    async fn disconnect(&mut self, peer: PeerId) -> Result<()> {
+        // todo: verify that the peer id exists in self.connections
+        if self.peers.remove(&peer).is_none() {
+            log::warn!("attempted to remove nonexistent peer")
+        }
+        Ok(())
+    }
+}
+
+// todo: add support for more codecs. perhaps make it configurable
+fn create_api() -> Result<webrtc::api::API> {
+    let mut media = MediaEngine::default();
+    media.register_default_codecs()?;
+
+    // Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
+    // This provides NACKs, RTCP Reports and other features. If you use `webrtc.NewPeerConnection`
+    // this is enabled by default. If you are manually managing You MUST create a InterceptorRegistry
+    // for each PeerConnection.
+    let mut registry = Registry::new();
+
+    // Use the default set of Interceptors
+    registry = register_default_interceptors(registry, &mut media)?;
+
+    // Create the API object with the MediaEngine
+    Ok(APIBuilder::new()
+        .with_media_engine(media)
+        .with_interceptor_registry(registry)
+        .build())
 }

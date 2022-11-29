@@ -5,6 +5,18 @@ use webrtc::api::media_engine::{
     MIME_TYPE_VP8, MIME_TYPE_VP9,
 };
 
+/// Indicates the device from which the media stream originates
+#[derive(Serialize, Deserialize)]
+pub enum MediaSource {
+    /// audio destination
+    Microphone,
+    /// video destination
+    Camera,
+    /// video destination
+    Screen,
+}
+
+
 /// represents the MIME types from webrtc::api::media_engine
 #[derive(Serialize, Deserialize)]
 pub enum MimeType {

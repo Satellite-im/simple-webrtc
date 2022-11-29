@@ -1,4 +1,6 @@
 use tokio::sync::{broadcast, mpsc, oneshot};
+use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
+use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::rtp;
 
 mod internal;
@@ -73,6 +75,36 @@ impl SimpleWebRtc {
         if let Err(_e) = self
             .control_channel
             .send(InternalCmd::Disconnect { peer, response: tx })
+        {
+            todo!();
+        }
+
+        match rx.await {
+            Ok(_r) => todo!(),
+            Err(_e) => todo!(),
+        }
+    }
+    /// receive an ICE candidate from the remote side
+    pub async fn recv_ice_candidate(&self, peer: PeerId, candidate: RTCIceCandidate) {
+        let (tx, rx) = oneshot::channel::<GenericResponse>();
+        if let Err(_e) = self
+            .control_channel
+            .send(InternalCmd::IceCandidate { peer, candidate, response: tx })
+        {
+            todo!();
+        }
+
+        match rx.await {
+            Ok(_r) => todo!(),
+            Err(_e) => todo!(),
+        }
+    }
+    /// receive an SDP object from the remote side
+    pub async fn recv_sdp(&self, peer: PeerId, sdp: RTCSessionDescription){
+        let (tx, rx) = oneshot::channel::<GenericResponse>();
+        if let Err(_e) = self
+            .control_channel
+            .send(InternalCmd::Sdp { peer, sdp, response: tx })
         {
             todo!();
         }

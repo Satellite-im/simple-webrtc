@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{broadcast, mpsc};
@@ -15,6 +15,10 @@ use webrtc::{
     rtp,
     track::{track_local::track_local_static_rtp::TrackLocalStaticRTP, track_remote::TrackRemote},
 };
+use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
+use webrtc::ice_transport::ice_server::RTCIceServer;
+use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
 /// simple-webrtc-internal
 
@@ -68,15 +72,21 @@ pub struct SimpleWebRtc {
     /// when the remote side creates a track (for sending), pass it here
     incoming_media_chan: mpsc::UnboundedSender<TrackOpened>,
     /// peer ID, connection
-    connections: HashMap<String, Arc<RTCPeerConnection>>,
+    connections: HashMap<PeerId, Arc<RTCPeerConnection>>,
     /// used to transmit audio/video to every peer
-    outgoing_media_tracks: HashMap<String, Arc<TrackLocalStaticRTP>>,
+    outgoing_media_tracks: HashMap<TrackKey, Arc<TrackLocalStaticRTP>>,
     /// Allows the client to feed RTP packets to all peers
-    local_media_tracks: HashMap<String, broadcast::Receiver<rtp::packet::Packet>>,
+    local_media_tracks: HashMap<TrackKey, broadcast::Receiver<rtp::packet::Packet>>,
 }
 
 // todo: possibly make this a trait
-pub type PeerId = Uuid;
+pub type PeerId = String;
+
+// don't want track names to collide - combine with the peer_id
+pub struct TrackKey {
+    pub peer_id: PeerId,
+    pub track_name: String
+}
 
 pub struct TrackOpened {
     pub track: Option<Arc<TrackRemote>>,
@@ -103,15 +113,64 @@ impl SimpleWebRtc {
             local_media_tracks: HashMap::new(),
         })
     }
-    // todo: add remote id
+
     /// Initiates a connection
-    pub async fn connect(&mut self) {
-        todo!()
+    pub async fn connect(&mut self, peer: &PeerId) -> Result<()>{
+        // todo: ensure id is not in self.connections
+
+        let config = RTCConfiguration {
+            ice_servers: vec![RTCIceServer {
+                urls: vec![
+                    "stun:stun.services.mozilla.com:3478".into(),
+                    "stun:stun.l.google.com:19302".into(),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        // Create a new RTCPeerConnection
+        let peer_connection = Arc::new(self.api.new_peer_connection(config).await?);
+        if self.connections.insert(peer.clone(), peer_connection).is_some() {
+            log::warn!("overwriting peer connection");
+        }
+        Ok(())
     }
     /// terminates a connection
-    pub async fn disconnect(&mut self) {
-        todo!()
+    pub async fn disconnect(&mut self, peer: &PeerId) -> Result<()> {
+        // todo: verify that the peer id exists in self.connections
+        if self.connections.remove(peer).is_none() {
+            log::warn!("attempted to remove nonexistent peer")
+        }
+        Ok(())
     }
+
+    /// Tells the client of a possible address which may be used to connect to the remote side
+    pub async fn recv_ice_candidate(&self, peer: &PeerId, candidate: RTCIceCandidate) -> Result<()>{
+         if let Some(pc)  = self.connections.get(peer) {
+             let candidate = candidate.to_json()?.candidate;
+            pc.add_ice_candidate(RTCIceCandidateInit {
+                candidate,
+                ..Default::default()
+            }).await?;
+        } else {
+             bail!("peer not found");
+         }
+
+        Ok(())
+    }
+
+    /// pass the sdp of the remote side to the client
+    pub async fn recv_sdp(&self, peer: &PeerId, sdp: RTCSessionDescription) -> Result<()> {
+        if let Some(pc)  = self.connections.get(peer) {
+            pc.set_remote_description(sdp).await?;
+        } else {
+            bail!("peer not found");
+        }
+
+        Ok(())
+    }
+
     /// Add a media track (audio or video)
     /// Registers a media source, stored in `local_media_tracks`
     /// when a peer connects, a corresponding connection is automatically created in

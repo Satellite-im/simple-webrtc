@@ -10,6 +10,8 @@ use webrtc::rtp;
 
 pub type GenericResponse = Result<(), ()>;
 pub enum InternalCmd {
+    /// Tell the client to initiate a connection
+    /// The Client will generate an SDP and send it
     Connect {
         peer: PeerId,
         response: oneshot::Sender<GenericResponse>,

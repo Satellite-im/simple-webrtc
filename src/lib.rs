@@ -36,9 +36,10 @@ extern crate lazy_static;
 /// external API provide the nice convenient methods a user would like and then behind the
 /// scenes communicate with a background thread via channels.
 pub struct SimpleWebRtc {
-    // when SimpleWebRtc is dropped, this channel will close and then the
-    // background thread will detect a closed channel and terminate
+    /// controls the thread running simple_webrtc
     control_channel: mpsc::UnboundedSender<InternalCmd>,
+    /// receives incoming signals
+    incoming_signal_chan: mpsc::UnboundedReceiver<PeerSignal>,
 }
 
 impl SimpleWebRtc {

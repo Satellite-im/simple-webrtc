@@ -102,7 +102,7 @@ pub struct SimpleWebRtc {
     /// used by the client to communicate with the controlling process
     event_signal_chan: mpsc::UnboundedSender<EventSignal>,
     /// receives incoming signals
-    incoming_signal_chan: mpsc::UnboundedReceiver<PeerSignal>,
+    outbound_signal_chan: mpsc::UnboundedSender<PeerSignal>,
     /// when the remote side creates a track (for sending), pass it here
     incoming_media_chan: mpsc::UnboundedSender<TrackOpened>,
     /// peer ID, connection

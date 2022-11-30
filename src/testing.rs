@@ -1,5 +1,4 @@
-use crate::internal::simple_webrtc::{PeerSignal, TrackDescription};
-use crate::MediaSource;
+
 use anyhow::Result;
 use hyper::{
     service::{make_service_fn, service_fn},
@@ -26,6 +25,15 @@ lazy_static! {
     static ref SIGNAL_CHAN: Mutex<Option<mpsc::UnboundedSender<PeerSignal>>> = Mutex::new(None);
 }
 
+// peer-to-peer signals - can be sent or received
+ pub enum PeerSignal {
+     Ice,
+     Sdp,
+     CallInitiated,
+     CallTerminated,
+     CallRejected,
+ }
+
 /// when a signal is received by the web server, it is transmitted via this channel
 pub async fn set_signal_tx_chan(chan: mpsc::UnboundedSender<PeerSignal>) {
     let chan = Some(chan);
@@ -49,16 +57,6 @@ pub async fn send_ice_candidate(remote_host: &str, candidate: &RTCIceCandidate) 
 pub async fn send_sdp(remote_host: &str, sdp: &RTCSessionDescription) -> Result<()> {
     let payload = serde_json::to_string(&sdp)?;
     send_signal(remote_host, "/sdp", payload).await
-}
-
-pub async fn send_add_track(remote_host: &str, desc: TrackDescription) -> Result<()> {
-    let payload = serde_json::to_string(&desc)?;
-    send_signal(remote_host, "/add-track", payload).await
-}
-
-pub async fn send_remove_track(remote_host: &str, desc: TrackDescription) -> Result<()> {
-    let payload = serde_json::to_string(&desc)?;
-    send_signal(remote_host, "/remove-track", payload).await
 }
 
 async fn send_signal(remote_host: &str, route: &str, payload: String) -> Result<()> {
@@ -174,51 +172,6 @@ async fn remote_handler(req: Request<Body>) -> Result<Response<Body>, hyper::Err
             }*/
             Ok(response)
         }
-        (&Method::POST, "/add-track") => {
-            let track_str =
-                match std::str::from_utf8(&hyper::body::to_bytes(req.into_body()).await?) {
-                    Ok(s) => s.to_owned(),
-                    Err(err) => {
-                        log::error!(" error parsing payload: {}", err);
-                        *response.status_mut() = StatusCode::BAD_REQUEST;
-                        return Ok(response);
-                    }
-                };
-
-            let _track_desc = match serde_json::from_str::<TrackDescription>(&track_str) {
-                Ok(s) => s,
-                Err(err) => {
-                    log::error!("StreamInit deserialize error: {}", err);
-                    *response.status_mut() = StatusCode::BAD_REQUEST;
-                    return Ok(response);
-                }
-            };
-
-            Ok(response)
-        }
-        (&Method::POST, "/remove-track") => {
-            let track_str =
-                match std::str::from_utf8(&hyper::body::to_bytes(req.into_body()).await?) {
-                    Ok(s) => s.to_owned(),
-                    Err(err) => {
-                        log::error!(" error parsing payload: {}", err);
-                        *response.status_mut() = StatusCode::BAD_REQUEST;
-                        return Ok(response);
-                    }
-                };
-
-            let _track_desc = match serde_json::from_str::<TrackDescription>(&track_str) {
-                Ok(s) => s,
-                Err(err) => {
-                    log::error!("StreamInit deserialize error: {}", err);
-                    *response.status_mut() = StatusCode::BAD_REQUEST;
-                    return Ok(response);
-                }
-            };
-
-            Ok(response)
-        }
-
         // Return the 404 Not Found for other routes.
         _ => {
             *response.status_mut() = StatusCode::NOT_FOUND;

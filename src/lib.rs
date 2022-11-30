@@ -26,6 +26,7 @@ use crate::internal::events::*;
 
 // public exports
 pub use internal::data_types::{MediaSourceId, PeerId, MimeType};
+pub use internal::events::EmittedEvents;
 pub use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::rtp_transceiver::rtp_sender::RTCRtpSender;
 use webrtc::track::track_local::TrackLocalWriter;

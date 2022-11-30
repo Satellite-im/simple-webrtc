@@ -31,9 +31,7 @@ use webrtc::rtp_transceiver::rtp_sender::RTCRtpSender;
 use webrtc::track::track_local::TrackLocalWriter;
 
 #[cfg(feature = "test-server")]
-mod testing;
-#[cfg(feature = "test-server")]
-pub use testing::*;
+pub mod testing;
 
 #[cfg(feature = "test-server")]
 #[macro_use]

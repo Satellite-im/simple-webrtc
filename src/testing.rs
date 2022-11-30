@@ -12,6 +12,8 @@ use tokio::sync::{mpsc, Mutex};
 use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
+use crate::PeerSignal;
+
 /// testing
 /// simple_webrtc requires signaling to initiate the WebRTC connection and to add/remove tracks
 /// a signaling server is provided for development purposes. This will allow the developers to

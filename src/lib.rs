@@ -43,7 +43,11 @@ extern crate lazy_static;
 /// is the user's responsibility.
 ///
 /// WebRTC requires out of band signalling. The `SimpleWebRtc` accepts a callback for transmitting
-/// signals and a channel for receiving signals.
+/// signals which must be forwarded to the specified peer
+///
+/// This library is not responsible for Media capture. Initializing a `Controller` results in
+/// the Controller struct and a set of channels which shall be used to transmit RTP packets
+/// over WebRTC.
 
 pub struct Controller {
     api: webrtc::api::API,

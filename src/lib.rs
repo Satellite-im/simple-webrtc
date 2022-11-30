@@ -33,7 +33,7 @@ use webrtc::track::track_local::TrackLocalWriter;
 #[cfg(feature = "test-server")]
 mod testing;
 #[cfg(feature = "test-server")]
-pub use testing::signaling_server;
+pub use testing::*;
 
 #[cfg(feature = "test-server")]
 #[macro_use]

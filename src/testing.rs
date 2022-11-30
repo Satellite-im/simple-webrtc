@@ -1,4 +1,3 @@
-
 use anyhow::Result;
 use hyper::{
     service::{make_service_fn, service_fn},
@@ -24,15 +23,6 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 lazy_static! {
     static ref SIGNAL_CHAN: Mutex<Option<mpsc::UnboundedSender<PeerSignal>>> = Mutex::new(None);
 }
-
-// peer-to-peer signals - can be sent or received
- pub enum PeerSignal {
-     Ice,
-     Sdp,
-     CallInitiated,
-     CallTerminated,
-     CallRejected,
- }
 
 /// when a signal is received by the web server, it is transmitted via this channel
 pub async fn set_signal_tx_chan(chan: mpsc::UnboundedSender<PeerSignal>) {

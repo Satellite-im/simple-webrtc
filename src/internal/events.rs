@@ -5,14 +5,29 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
 use webrtc::track::track_remote::TrackRemote;
 
-// peer-to-peer signals - can be sent or received
-// pub enum PeerSignals {
-//     Ice,
-//     Sdp,
-//     CallInitiated,
-//     CallTerminated,
-//     CallRejected,
-// }
+/// Signaling required for SimpleWebRTC
+/// the user intercepts EmittedEvents and, when signaling is required, transforms the event into
+/// the appropriate signal.
+pub enum PeerSignal {
+    Ice {
+        peer_id: String,
+        candidate: Box<RTCIceCandidate>,
+    },
+    Sdp {
+        peer_id: String,
+        sdp: Box<RTCSessionDescription>,
+    },
+    CallInitiated {
+        peer_id: String,
+        sdp: Box<RTCSessionDescription>,
+    },
+    CallTerminated {
+        peer_id: String,
+    },
+    CallRejected {
+        peer_id: String,
+    },
+}
 
 #[derive(Debug)]
 pub enum EmittedEvents {

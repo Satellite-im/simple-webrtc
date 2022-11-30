@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use webrtc::api::media_engine::{
     MIME_TYPE_AV1, MIME_TYPE_G722, MIME_TYPE_H264, MIME_TYPE_OPUS, MIME_TYPE_PCMA, MIME_TYPE_PCMU,
     MIME_TYPE_VP8, MIME_TYPE_VP9,

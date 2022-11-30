@@ -22,9 +22,11 @@ mod internal;
 
 use crate::internal::data_types::*;
 use crate::internal::events::*;
+use crate::internal::media::{MediaWorker, MediaWorkerCommands, MediaWorkerChannels};
 
 // public exports
-pub use internal::media::*;
+pub use internal::media::{MimeType, MediaSource, MediaWorkerInputs};
+pub use internal::data_types::PeerId;
 
 #[cfg(feature = "test-server")]
 mod testing;
@@ -65,6 +67,16 @@ pub struct Controller {
 pub struct InitArgs {
     pub id: PeerId,
     pub emitted_event_chan: mpsc::UnboundedSender<EmittedEvents>,
+}
+
+/// stores a PeerConnection for updating SDP and ICE candidates, adding and removing tracks
+/// also stores associated media streams
+pub struct Peer {
+    pub state: PeerState,
+    pub id: PeerId,
+    pub connection: Arc<RTCPeerConnection>,
+    /// incoming media
+    pub tracks: HashMap<String, Arc<TrackRemote>>,
 }
 
 /// The following functions are driven by the UI:

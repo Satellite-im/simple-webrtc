@@ -45,14 +45,18 @@ extern crate lazy_static;
 /// simplifying the process of exchanging media with multiple peers simultaneously.
 ///
 /// this library allows for the exchange of RTP packets. Transforming audio/video into RTP packets
-/// is the user's responsibility.
+/// is the user's responsibility. `webrtc-rs` provides a `rtp::packetizer` to turn raw samples into
+/// RTP packets. `webrtc-rs` also provides a `media::io::sample_builder` to turn received RTP packets
+/// into samples. `simple-webrtc` may expose these interfaces later.
+///
+/// The `add_media_source` function returns a `TrackLocalWriter`, with which the user will send
+/// their RTP packets. Internally, a track is created and added to all existing and future peer
+/// connections.. Writing a packet to the `TrackLocalWriter` will cause the packet to be forwarded
+/// to all connected peers.
 ///
 /// WebRTC requires out of band signalling. The `SimpleWebRtc` accepts a callback for transmitting
 /// signals which must be forwarded to the specified peer
 ///
-/// This library is not responsible for Media capture. Initializing a `Controller` results in
-/// the Controller struct and a set of channels which shall be used to transmit RTP packets
-/// over WebRTC.
 
 pub struct Controller {
     api: webrtc::api::API,
@@ -90,8 +94,8 @@ pub struct Peer {
 /// dial
 /// accept_call
 /// hang_up
-/// add_track
-/// remove_track
+/// add_media_source
+/// remove_media_source
 ///
 /// The following functions are driven by signaling
 /// recv_ice

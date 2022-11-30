@@ -24,6 +24,11 @@ pub enum EmittedEvents {
         dest: PeerId,
         sdp: Box<RTCSessionDescription>,
     },
+    /// created after calling `Dial`
+    CallInitiated {
+        dest: PeerId,
+        sdp: Box<RTCSessionDescription>,
+    },
     /// unless a CallTerminated event was received, results in a reconnect
     /// needs to be handled by the developer
     Disconnected { peer: PeerId },

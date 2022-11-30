@@ -22,7 +22,6 @@ use webrtc::track::track_remote::TrackRemote;
 mod internal;
 
 use crate::internal::data_types::*;
-use crate::internal::events::*;
 
 // public exports
 pub use internal::data_types::{MediaSourceId, PeerId, MimeType};
@@ -118,7 +117,7 @@ impl Controller {
         // Note: this will start the gathering of ICE candidates
         pc.set_local_description(local_sdp.clone()).await?;
 
-        self.emitted_event_chan.send(EmittedEvents::Sdp {
+        self.emitted_event_chan.send(EmittedEvents::CallInitiated {
             dest: peer,
             sdp: Box::new(local_sdp),
         })?;

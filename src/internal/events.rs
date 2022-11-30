@@ -1,33 +1,35 @@
 use crate::internal::data_types::PeerId;
 use std::sync::Arc;
+//use serde::{Serialize, Deserialize};
 use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
 use webrtc::track::track_remote::TrackRemote;
 
-/// Signaling required for SimpleWebRTC
-/// the user intercepts EmittedEvents and, when signaling is required, transforms the event into
-/// the appropriate signal.
-pub enum PeerSignal {
-    Ice {
-        peer_id: String,
-        candidate: Box<RTCIceCandidate>,
-    },
-    Sdp {
-        peer_id: String,
-        sdp: Box<RTCSessionDescription>,
-    },
-    CallInitiated {
-        peer_id: String,
-        sdp: Box<RTCSessionDescription>,
-    },
-    CallTerminated {
-        peer_id: String,
-    },
-    CallRejected {
-        peer_id: String,
-    },
-}
+// Signaling required for SimpleWebRTC
+// the user intercepts EmittedEvents and, when signaling is required, transforms the event into
+// the appropriate signal.
+// #[derive(Serialize, Deserialize)]
+// pub enum PeerSignal {
+//     Ice {
+//         peer_id: String,
+//         candidate: Box<RTCIceCandidate>,
+//     },
+//     Sdp {
+//         peer_id: String,
+//         sdp: Box<RTCSessionDescription>,
+//     },
+//     CallInitiated {
+//         peer_id: String,
+//         sdp: Box<RTCSessionDescription>,
+//     },
+//     CallTerminated {
+//         peer_id: String,
+//     },
+//     CallRejected {
+//         peer_id: String,
+//     },
+// }
 
 #[derive(Debug)]
 pub enum EmittedEvents {

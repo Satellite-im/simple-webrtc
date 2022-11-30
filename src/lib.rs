@@ -25,8 +25,7 @@ use crate::internal::data_types::*;
 use crate::internal::events::*;
 
 // public exports
-pub use internal::data_types::{MediaSourceId, MediaSourceTx, PeerId};
-pub use internal::media::{MediaSource, MimeType};
+pub use internal::data_types::{MediaSourceId, PeerId, MimeType};
 pub use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::rtp_transceiver::rtp_sender::RTCRtpSender;
 use webrtc::track::track_local::TrackLocalWriter;
@@ -155,16 +154,25 @@ impl Controller {
 
         Ok(())
     }
-    /// Removes the RTCPeerConnection
+    /// Terminates a connection
     /// the controlling application should send a HangUp signal to the remote side
-    pub fn hang_up(&mut self, peer: PeerId) {
-        // todo: tell MediaWorker to drop channels associated with Peer
-
-        if self.peers.remove(&peer).is_none() {
-            log::info!("called hang_up for non-connected peer");
+    pub async fn hang_up(&mut self, peer_id: PeerId) {
+        // not sure if it's necessary to remove all tracks
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            for (source_id, rtp_sender) in &peer.rtp_senders {
+                if let Err(e) = peer.connection.remove_track(rtp_sender).await {
+                    log::error!(
+                        "failed to remove rtp_sender for source {} from peer {} on disconnect: {:?}",
+                        &source_id,
+                        &peer_id,
+                        e
+                    );
+                }
+            }
         }
-
-        // todo: unregister tracks from MediaWorkers
+        if self.peers.remove(&peer_id).is_none() {
+            log::warn!("attempted to remove nonexistent peer")
+        }
     }
 
     /// Spawns a MediaWorker which will receive RTP packets and forward them to all peers
@@ -392,27 +400,6 @@ impl Controller {
             }
         }
         Ok(peer_connection)
-    }
-
-    /// terminates a connection
-    async fn disconnect(&mut self, peer_id: PeerId) -> Result<()> {
-        // tno sure if it's necessary to remove all tracks
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            for (source_id, rtp_sender) in &peer.rtp_senders {
-                if let Err(e) = peer.connection.remove_track(rtp_sender).await {
-                    log::error!(
-                        "failed to remove rtp_sender for source {} from peer {} on disconnect: {:?}",
-                        &source_id,
-                        &peer_id,
-                        e
-                    );
-                }
-            }
-        }
-        if self.peers.remove(&peer_id).is_none() {
-            log::warn!("attempted to remove nonexistent peer")
-        }
-        Ok(())
     }
 }
 

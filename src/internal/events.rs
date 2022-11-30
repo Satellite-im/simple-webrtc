@@ -33,7 +33,7 @@ pub enum EmittedEvents {
         peer: PeerId,
         track: Arc<TrackRemote>,
     },
-    // it apperas that WebRTC doesn't emit an event for this. perhaps the track is automatically
+    // it appears that WebRTC doesn't emit an event for this. perhaps the track is automatically
     // closed on the remote side when the local side calls `remove_track`
     // TrackRemoved,
 }

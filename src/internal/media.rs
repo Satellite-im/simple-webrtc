@@ -1,16 +1,10 @@
-use crate::PeerId;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::mpsc;
+
 use webrtc::api::media_engine::{
     MIME_TYPE_AV1, MIME_TYPE_G722, MIME_TYPE_H264, MIME_TYPE_OPUS, MIME_TYPE_PCMA, MIME_TYPE_PCMU,
     MIME_TYPE_VP8, MIME_TYPE_VP9,
 };
-use webrtc::rtp;
-use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-use webrtc::track::track_local::TrackLocalWriter;
 
 // todo: remove this?
 /// Indicates the device from which the media stream originates

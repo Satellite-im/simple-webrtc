@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use webrtc::api::interceptor_registry::register_default_interceptors;
@@ -13,7 +13,7 @@ use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::RTCPeerConnection;
 
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use webrtc::rtp;
+
 use webrtc::rtp_transceiver::rtp_receiver::RTCRtpReceiver;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
@@ -30,7 +30,6 @@ pub use internal::media::{MediaSource, MimeType};
 pub use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::rtp_transceiver::rtp_sender::RTCRtpSender;
 use webrtc::track::track_local::TrackLocalWriter;
-use webrtc::util::KeyingMaterialExporterError::Hash;
 
 #[cfg(feature = "test-server")]
 mod testing;
@@ -212,7 +211,12 @@ impl Controller {
             // if source_id isn't found, it will be logged by the next statement
             if let Some(rtp_sender) = peer.rtp_senders.get(&source_id) {
                 if let Err(e) = peer.connection.remove_track(rtp_sender).await {
-                    log::error!("failed to remove track {} for peer {}: {:?}", &source_id, peer_id, e);
+                    log::error!(
+                        "failed to remove track {} for peer {}: {:?}",
+                        &source_id,
+                        peer_id,
+                        e
+                    );
                 }
             }
 

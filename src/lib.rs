@@ -383,7 +383,15 @@ impl Controller {
         for (source_id, track) in &self.media_sources {
             match peer_connection.add_track(track.clone()).await {
                 Ok(rtp_sender) => {
-                    rtp_senders.insert(source_id.clone(), rtp_sender);
+                    rtp_senders.insert(source_id.clone(), rtp_sender.clone());
+                    // Read incoming RTCP packets
+                    // Before these packets are returned they are processed by interceptors. For things
+                    // like NACK this needs to be called.
+                    tokio::spawn(async move {
+                        let mut rtcp_buf = vec![0u8; 1500];
+                        while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+                        Result::<()>::Ok(())
+                    });
                 }
                 Err(e) => {
                     log::error!(

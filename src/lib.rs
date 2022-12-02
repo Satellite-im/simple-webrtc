@@ -110,15 +110,15 @@ impl Controller {
     /// creates a RTCPeerConnection, sets the local SDP object, emits a CallInitiatedEvent,
     /// which contains the SDP object
     /// continues with the following signals: Sdp, CallTerminated, CallRejected
-    pub async fn dial(&mut self, peer: PeerId) -> Result<()> {
-        let pc = self.connect(peer.clone()).await?;
+    pub async fn dial(&mut self, peer_id: &PeerId) -> Result<()> {
+        let pc = self.connect(peer_id).await?;
         let local_sdp = pc.create_offer(None).await?;
         // Sets the LocalDescription, and starts our UDP listeners
         // Note: this will start the gathering of ICE candidates
         pc.set_local_description(local_sdp.clone()).await?;
 
         self.emitted_event_chan.send(EmittedEvents::CallInitiated {
-            dest: peer,
+            dest: peer_id.clone(),
             sdp: Box::new(local_sdp),
         })?;
 
@@ -127,23 +127,23 @@ impl Controller {
     /// adds the remote sdp, sets own sdp, and sends own sdp to remote
     pub async fn accept_call(
         &mut self,
-        peer: PeerId,
+        peer_id: &PeerId,
         remote_sdp: RTCSessionDescription,
     ) -> Result<()> {
-        let pc = self.connect(peer.clone()).await.context(format!("{}:{}", file!(), line!()))?;
+        let pc = self.connect(peer_id).await.context(format!("{}:{}", file!(), line!()))?;
         pc.set_remote_description(remote_sdp).await.context(format!("{}:{}", file!(), line!()))?;
 
         let answer = pc.create_answer(None).await.context(format!("{}:{}", file!(), line!()))?;
         pc.set_local_description(answer.clone()).await.context(format!("{}:{}", file!(), line!()))?;
 
-        if let Some(p) = self.peers.get_mut(&peer) {
+        if let Some(p) = self.peers.get_mut(peer_id) {
             p.state = PeerState::WaitingForIce;
         } else {
             bail!("peer not found");
         }
 
         self.emitted_event_chan.send(EmittedEvents::Sdp {
-            dest: peer,
+            dest: peer_id.clone(),
             sdp: Box::new(answer),
         })?;
 
@@ -151,9 +151,9 @@ impl Controller {
     }
     /// Terminates a connection
     /// the controlling application should send a HangUp signal to the remote side
-    pub async fn hang_up(&mut self, peer_id: PeerId) {
+    pub async fn hang_up(&mut self, peer_id: &PeerId) {
         // not sure if it's necessary to remove all tracks
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
+        if let Some(peer) = self.peers.get_mut(peer_id) {
             for (source_id, rtp_sender) in &peer.rtp_senders {
                 if let Err(e) = peer.connection.remove_track(rtp_sender).await {
                     log::error!(
@@ -165,8 +165,9 @@ impl Controller {
                 }
             }
         }
-        if self.peers.remove(&peer_id).is_none() {
-            log::warn!("attempted to remove nonexistent peer")
+        match self.peers.remove(peer_id) {
+            Some(peer) => drop(peer),
+            None => log::warn!("attempted to remove nonexistent peer"),
         }
     }
 
@@ -242,8 +243,8 @@ impl Controller {
     }
 
     /// receive an ICE candidate from the remote side
-    pub async fn recv_ice(&self, peer: PeerId, candidate: RTCIceCandidate) -> Result<()> {
-        if let Some(peer) = self.peers.get(&peer) {
+    pub async fn recv_ice(&self, peer_id: &PeerId, candidate: RTCIceCandidate) -> Result<()> {
+        if let Some(peer) = self.peers.get(peer_id) {
             let candidate = candidate.to_json()?.candidate;
             peer.connection
                 .add_ice_candidate(RTCIceCandidateInit {
@@ -258,8 +259,8 @@ impl Controller {
         Ok(())
     }
     /// receive an SDP object from the remote side
-    pub async fn recv_sdp(&self, peer: PeerId, sdp: RTCSessionDescription) -> Result<()> {
-        if let Some(peer) = self.peers.get(&peer) {
+    pub async fn recv_sdp(&self, peer_id: &PeerId, sdp: RTCSessionDescription) -> Result<()> {
+        if let Some(peer) = self.peers.get(peer_id) {
             peer.connection.set_remote_description(sdp).await?;
         } else {
             bail!("peer not found");
@@ -271,7 +272,7 @@ impl Controller {
     /// adds a connection. called by dial and accept_call
     /// inserts the connection into self.peers
     /// initializes state to WaitingForSdp
-    async fn connect(&mut self, peer_id: PeerId) -> Result<Arc<RTCPeerConnection>> {
+    async fn connect(&mut self, peer_id: &PeerId) -> Result<Arc<RTCPeerConnection>> {
         // todo: ensure id is not in self.connections
 
         // create ICE gatherer
@@ -385,7 +386,7 @@ impl Controller {
                 }
             }
         }
-        match self.peers.get_mut(&peer_id) {
+        match self.peers.get_mut(peer_id) {
             Some(p) => p.rtp_senders = rtp_senders,
             None => {
                 log::error!(

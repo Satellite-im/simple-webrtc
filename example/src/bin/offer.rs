@@ -99,7 +99,7 @@ async fn handle_swrtc(
 ) -> Result<()> {
     {
         let mut s = swrtc.lock().await;
-        s.dial(peer_address.clone()).await?;
+        s.dial(&peer_address).await?;
     }
 
     loop {
@@ -118,33 +118,35 @@ async fn handle_signals(
             PeerSignal::Ice(sig) => {
                 log::debug!("signal: ICE");
                 let s = swrtc.lock().await;
-                if let Err(e) = s.recv_ice(sig.src, sig.ice).await {
+                if let Err(e) = s.recv_ice(&sig.src, sig.ice).await {
                     log::error!("{}", e);
                 }
             }
             PeerSignal::Sdp(sig) => {
                 log::debug!("signal: SDP");
                 let s = swrtc.lock().await;
-                if let Err(e) = s.recv_sdp(sig.src, sig.sdp).await {
-                    log::error!("{}", e);
+                if let Err(e) = s.recv_sdp(&sig.src, sig.sdp).await {
+                    log::error!("failed to recv_sdp: {}", e);
                 }
             }
             PeerSignal::CallInitiated(sig) => {
                 log::debug!("signal: CallInitiated");
                 let mut s = swrtc.lock().await;
-                if let Err(e) = s.accept_call(sig.src, sig.sdp).await {
-                    log::error!("{}", e);
+                if let Err(e) = s.accept_call(&sig.src, sig.sdp).await {
+                    log::error!("failed to accept call: {}", e);
+                    s.hang_up(&sig.src).await;
+                    //send_disconnect(&sig.src, &client_address).await;
                 }
             }
             PeerSignal::CallTerminated(src) => {
                 log::debug!("signal: CallTerminated");
                 let mut s = swrtc.lock().await;
-                s.hang_up(src).await;
+                s.hang_up(&src).await;
             }
             PeerSignal::CallRejected(src) => {
                 log::debug!("signal: CallRejected");
                 let mut s = swrtc.lock().await;
-                s.hang_up(src).await;
+                s.hang_up(&src).await;
             }
         }
     }
@@ -195,7 +197,7 @@ async fn handle_events(
             EmittedEvents::Disconnected { peer } => {
                 log::debug!("event: Disconnected");
                 let mut s = swrtc.lock().await;
-                s.hang_up(peer).await;
+                s.hang_up(&peer).await;
             }
             _ => {}
         }

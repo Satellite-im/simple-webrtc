@@ -4,10 +4,10 @@ use hyper::{
     Body, Client, Method, Request, Response, StatusCode,
 };
 //use hyper_tls::HttpsConnector;
+use hyper::client::HttpConnector;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::str::FromStr;
-use hyper::client::HttpConnector;
 use tokio::sync::{mpsc, Mutex};
 use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
@@ -194,15 +194,15 @@ async fn remote_handler(req: Request<Body>) -> Result<Response<Body>, hyper::Err
         // this route was being used in the webrtc offer-answer example
         // without it, no ICE candiates were gathered. perhaps because of intermittent service from Google's STUN server
         (&Method::POST, "/ice-candidate") => {
-            let sig_str =
-                match std::str::from_utf8(&hyper::body::to_bytes(req.into_body()).await?) {
-                    Ok(s) => s.to_owned(),
-                    Err(err) => {
-                        log::error!(" error parsing payload: {}", err);
-                        *response.status_mut() = StatusCode::BAD_REQUEST;
-                        return Ok(response);
-                    }
-                };
+            let sig_str = match std::str::from_utf8(&hyper::body::to_bytes(req.into_body()).await?)
+            {
+                Ok(s) => s.to_owned(),
+                Err(err) => {
+                    log::error!(" error parsing payload: {}", err);
+                    *response.status_mut() = StatusCode::BAD_REQUEST;
+                    return Ok(response);
+                }
+            };
 
             let sig = match serde_json::from_str::<SigIce>(&sig_str) {
                 Ok(s) => s,

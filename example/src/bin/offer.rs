@@ -47,6 +47,7 @@ async fn main() -> Result<()> {
         id: cli.local.clone(),
         emitted_event_chan: client_event_tx,
     })?;
+    let swrtc: Arc<Mutex<Controller>> = Arc::new(Mutex::new(swrtc));
 
     // hook up signaling
     set_signal_tx_chan(server_signal_tx).await;
@@ -58,7 +59,7 @@ async fn main() -> Result<()> {
         _ = signaling_server => {
              println!("signaling terminated");
         }
-        _ = run(swrtc, cli.local.clone(), cli.remote.clone(), client_event_rx, server_signal_rx) => {
+        _ = run(swrtc.clone(), cli.local.clone(), cli.remote.clone(), client_event_rx, server_signal_rx) => {
            println!( "swrtc terminated");
         }
          _ = tokio::signal::ctrl_c() => {
@@ -66,19 +67,22 @@ async fn main() -> Result<()> {
         }
     }
 
+    {
+        let mut s = swrtc.lock().await;
+        s.deinit().await?;
+    }
+
     Ok(())
 }
 
 async fn run(
-    swrtc: simple_webrtc::Controller,
+    swrtc: Arc<Mutex<Controller>>,
     client_address: String,
     peer_address: String,
     client_event_rx: mpsc::UnboundedReceiver<EmittedEvents>,
     server_signal_rx: mpsc::UnboundedReceiver<PeerSignal>,
 ) {
     log::debug!("running offer");
-    let swrtc = Arc::new(Mutex::new(swrtc));
-
     tokio::select! {
         r = handle_swrtc(client_address.clone(), peer_address.clone(), swrtc.clone()) => {
             println!("handle_swrtc terminated: {:?}", r);
@@ -100,10 +104,14 @@ async fn handle_swrtc(
     {
         let mut s = swrtc.lock().await;
         // a media source must be added before attempting to connect or SDP will fail
-        s.add_media_source("audio".into(), RTCRtpCodecCapability {
-            mime_type: MimeType::OPUS.to_string(),
-            ..Default::default()
-        }).await?;
+        s.add_media_source(
+            "audio".into(),
+            RTCRtpCodecCapability {
+                mime_type: MimeType::OPUS.to_string(),
+                ..Default::default()
+            },
+        )
+        .await?;
         s.dial(&peer_address).await?;
     }
 

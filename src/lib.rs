@@ -1,4 +1,4 @@
-use anyhow::{bail, Result, Context};
+use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -107,6 +107,16 @@ impl Controller {
             media_sources: HashMap::new(),
         })
     }
+    /// Rust doesn't have async drop, so this function should be called when the user is
+    /// done with Controller. it will clean up all threads
+    pub async fn deinit(&mut self) -> Result<()> {
+        let peer_ids: Vec<PeerId> = self.peers.keys().cloned().collect();
+        for peer_id  in peer_ids {
+            self.hang_up(&peer_id).await;
+        }
+
+        Ok(())
+    }
     /// creates a RTCPeerConnection, sets the local SDP object, emits a CallInitiatedEvent,
     /// which contains the SDP object
     /// continues with the following signals: Sdp, CallTerminated, CallRejected
@@ -130,11 +140,21 @@ impl Controller {
         peer_id: &PeerId,
         remote_sdp: RTCSessionDescription,
     ) -> Result<()> {
-        let pc = self.connect(peer_id).await.context(format!("{}:{}", file!(), line!()))?;
-        pc.set_remote_description(remote_sdp).await.context(format!("{}:{}", file!(), line!()))?;
+        let pc = self
+            .connect(peer_id)
+            .await
+            .context(format!("{}:{}", file!(), line!()))?;
+        pc.set_remote_description(remote_sdp)
+            .await
+            .context(format!("{}:{}", file!(), line!()))?;
 
-        let answer = pc.create_answer(None).await.context(format!("{}:{}", file!(), line!()))?;
-        pc.set_local_description(answer.clone()).await.context(format!("{}:{}", file!(), line!()))?;
+        let answer = pc
+            .create_answer(None)
+            .await
+            .context(format!("{}:{}", file!(), line!()))?;
+        pc.set_local_description(answer.clone())
+            .await
+            .context(format!("{}:{}", file!(), line!()))?;
 
         if let Some(p) = self.peers.get_mut(peer_id) {
             p.state = PeerState::WaitingForIce;
@@ -155,6 +175,8 @@ impl Controller {
         // not sure if it's necessary to remove all tracks
         if let Some(peer) = self.peers.get_mut(peer_id) {
             for (source_id, rtp_sender) in &peer.rtp_senders {
+                // remove_track internally calls rtp_sender.stop(), which will stop the associated
+                // thread
                 if let Err(e) = peer.connection.remove_track(rtp_sender).await {
                     log::error!(
                         "failed to remove rtp_sender for source {} from peer {} on disconnect: {:?}",
@@ -288,9 +310,7 @@ impl Controller {
         // create ICE gatherer
         let config = RTCConfiguration {
             ice_servers: vec![RTCIceServer {
-                urls: vec![
-                    "stun:stun.l.google.com:19302".into(),
-                ],
+                urls: vec!["stun:stun.l.google.com:19302".into()],
                 ..Default::default()
             }],
             ..Default::default()

@@ -52,21 +52,21 @@ pub async fn set_signal_tx_chan(chan: mpsc::UnboundedSender<PeerSignal>) {
 
 pub async fn send_connect(dest: &str, sig: SigSdp) -> Result<()> {
     let payload = serde_json::to_string(&sig)?;
-    send_signal(dest, "/connect", payload).await
+    send_signal(dest, "connect", payload).await
 }
 
 pub async fn send_disconnect(remote_host: &str, id: &str) -> Result<()> {
-    send_signal(remote_host, "/disconnect", id.into()).await
+    send_signal(remote_host, "disconnect", id.into()).await
 }
 
 pub async fn send_ice_candidate(remote_host: &str, sig: SigIce) -> Result<()> {
     let payload = serde_json::to_string(&sig)?;
-    send_signal(remote_host, "/ice-candidate", payload).await
+    send_signal(remote_host, "ice-candidate", payload).await
 }
 
 pub async fn send_sdp(remote_host: &str, sig: SigSdp) -> Result<()> {
     let payload = serde_json::to_string(&sig)?;
-    send_signal(remote_host, "/sdp", payload).await
+    send_signal(remote_host, "sdp", payload).await
 }
 
 async fn send_signal(remote_host: &str, route: &str, payload: String) -> Result<()> {

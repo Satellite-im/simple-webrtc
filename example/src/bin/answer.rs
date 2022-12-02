@@ -95,8 +95,17 @@ async fn run(
 async fn handle_swrtc(
     _client_address: String,
     _peer_address: String,
-    _swrtc: Arc<Mutex<Controller>>,
+    swrtc: Arc<Mutex<Controller>>,
 ) -> Result<()> {
+
+    {
+        let mut s = swrtc.lock().await;
+        // a media source must be added before attempting to connect or SDP will fail
+        s.add_media_source("video".into(), RTCRtpCodecCapability {
+            mime_type: MimeType::OPUS.to_string(),
+            ..Default::default()
+        }).await?;
+    }
 
     loop {
         sleep(Duration::from_millis(1000)).await;
@@ -128,11 +137,6 @@ async fn handle_signals(
             PeerSignal::CallInitiated(sig) => {
                 log::debug!("signal: CallInitiated");
                 let mut s = swrtc.lock().await;
-                // a media source must be added before attempting to connect or SDP will fail
-                s.add_media_source("answer-media-src".into(), RTCRtpCodecCapability {
-                    mime_type: MimeType::OPUS.to_string(),
-                    ..Default::default()
-                }).await?;
 
                 if let Err(e) = s.accept_call(&sig.src, sig.sdp).await {
                     log::error!("failed to accept call: {}", e);

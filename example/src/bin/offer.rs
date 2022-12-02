@@ -100,7 +100,7 @@ async fn handle_swrtc(
     {
         let mut s = swrtc.lock().await;
         // a media source must be added before attempting to connect or SDP will fail
-        s.add_media_source("offer-media-src".into(), RTCRtpCodecCapability {
+        s.add_media_source("audio".into(), RTCRtpCodecCapability {
             mime_type: MimeType::OPUS.to_string(),
             ..Default::default()
         }).await?;

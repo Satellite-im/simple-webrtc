@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Result, Context};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -130,14 +130,11 @@ impl Controller {
         peer: PeerId,
         remote_sdp: RTCSessionDescription,
     ) -> Result<()> {
-        let pc = self.connect(peer.clone()).await?;
-        if let Err(e) = pc.set_remote_description(remote_sdp).await {
-            log::error!("failed to set remote description: {:?}", e);
-            return Err(e.into());
-        }
+        let pc = self.connect(peer.clone()).await.context(format!("{}:{}", file!(), line!()))?;
+        pc.set_remote_description(remote_sdp).await.context(format!("{}:{}", file!(), line!()))?;
 
-        let answer = pc.create_answer(None).await?;
-        pc.set_local_description(answer.clone()).await?;
+        let answer = pc.create_answer(None).await.context(format!("{}:{}", file!(), line!()))?;
+        pc.set_local_description(answer.clone()).await.context(format!("{}:{}", file!(), line!()))?;
 
         if let Some(p) = self.peers.get_mut(&peer) {
             p.state = PeerState::WaitingForIce;

@@ -105,8 +105,6 @@ async fn handle_swrtc(
     loop {
         sleep(Duration::from_millis(1000)).await;
     }
-
-    Ok(())
 }
 
 async fn handle_signals(

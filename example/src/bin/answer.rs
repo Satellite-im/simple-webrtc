@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use simple_webrtc::testing::*;
-use simple_webrtc::{Controller, EmittedEvents};
+use simple_webrtc::{Controller, EmittedEvents, MimeType, RTCRtpCodecCapability};
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
@@ -97,6 +97,7 @@ async fn handle_swrtc(
     _peer_address: String,
     _swrtc: Arc<Mutex<Controller>>,
 ) -> Result<()> {
+
     loop {
         sleep(Duration::from_millis(1000)).await;
     }
@@ -127,6 +128,12 @@ async fn handle_signals(
             PeerSignal::CallInitiated(sig) => {
                 log::debug!("signal: CallInitiated");
                 let mut s = swrtc.lock().await;
+                // a media source must be added before attempting to connect or SDP will fail
+                s.add_media_source("answer-media-src".into(), RTCRtpCodecCapability {
+                    mime_type: MimeType::OPUS.to_string(),
+                    ..Default::default()
+                }).await?;
+
                 if let Err(e) = s.accept_call(&sig.src, sig.sdp).await {
                     log::error!("failed to accept call: {}", e);
                     s.hang_up(&sig.src).await;

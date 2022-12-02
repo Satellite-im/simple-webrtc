@@ -13,8 +13,8 @@ tokio = { version = "1.22.0", features = ["full"] }
 webrtc = "0.6.0"
 
 hyper = { version = "0.14", features = ["full"], optional = true }
-hyper-tls = { version = "0.5.0", optional = true }
+#hyper-tls = { version = "0.5.0", optional = true }
 lazy_static = { version = "1.4.0", optional = true }
 
 [features]
-test-server = ["dep:hyper", "dep:hyper-tls", "dep:lazy_static"]
+test-server = ["dep:hyper",  "dep:lazy_static"]

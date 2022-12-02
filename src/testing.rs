@@ -3,10 +3,11 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Client, Method, Request, Response, StatusCode,
 };
-use hyper_tls::HttpsConnector;
+//use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::str::FromStr;
+use hyper::client::HttpConnector;
 use tokio::sync::{mpsc, Mutex};
 use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
@@ -70,12 +71,12 @@ pub async fn send_sdp(remote_host: &str, sig: SigSdp) -> Result<()> {
 }
 
 async fn send_signal(remote_host: &str, route: &str, payload: String) -> Result<()> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
+    let http = HttpConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(http);
 
     let req = match Request::builder()
         .method(Method::POST)
-        .uri(format!("{}/{}", remote_host, route))
+        .uri(format!("http://{}/{}", remote_host, route))
         .header("content-type", "application/json; charset=utf-8")
         .body(Body::from(payload))
     {

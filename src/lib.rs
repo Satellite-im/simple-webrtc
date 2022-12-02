@@ -178,6 +178,7 @@ impl Controller {
         source_id: MediaSourceId,
         codec: RTCRtpCodecCapability,
     ) -> Result<Arc<dyn TrackLocalWriter>> {
+        // todo: don't allow adding duplicate source_ids
         let track = Arc::new(TrackLocalStaticRTP::new(
             codec,
             source_id.clone(),
@@ -279,7 +280,6 @@ impl Controller {
         let config = RTCConfiguration {
             ice_servers: vec![RTCIceServer {
                 urls: vec![
-                    "stun:stun.services.mozilla.com:3478".into(),
                     "stun:stun.l.google.com:19302".into(),
                 ],
                 ..Default::default()

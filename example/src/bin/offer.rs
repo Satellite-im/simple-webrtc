@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use simple_webrtc::testing::*;
-use simple_webrtc::{Controller, EmittedEvents};
+use simple_webrtc::{Controller, EmittedEvents, MimeType, RTCRtpCodecCapability};
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
@@ -99,6 +99,11 @@ async fn handle_swrtc(
 ) -> Result<()> {
     {
         let mut s = swrtc.lock().await;
+        // a media source must be added before attempting to connect or SDP will fail
+        s.add_media_source("offer-media-src".into(), RTCRtpCodecCapability {
+            mime_type: MimeType::OPUS.to_string(),
+            ..Default::default()
+        }).await?;
         s.dial(&peer_address).await?;
     }
 

@@ -1,5 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
+use cpal::{
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+    Sample,
+};
 use simple_webrtc::testing::*;
 use simple_webrtc::{Controller, EmittedEvents, MimeType, RTCRtpCodecCapability};
 use std::io::Write;
@@ -7,6 +11,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
+use webrtc::util::{Conn, Marshal, Unmarshal};
+use webrtc::{
+    media::io::sample_builder::SampleBuilder,
+    rtp::{self, packetizer::Depacketizer},
+    track::track_remote::TrackRemote,
+};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -105,7 +115,7 @@ async fn handle_swrtc(
         let mut s = swrtc.lock().await;
         // a media source must be added before attempting to connect or SDP will fail
         s.add_media_source(
-            "video".into(),
+            "audio".into(),
             RTCRtpCodecCapability {
                 mime_type: MimeType::OPUS.to_string(),
                 ..Default::default()
@@ -172,6 +182,12 @@ async fn handle_events(
     swrtc: Arc<Mutex<Controller>>,
     mut client_event_rx: mpsc::UnboundedReceiver<EmittedEvents>,
 ) -> Result<()> {
+    let host = cpal::default_host();
+    let device: cpal::Device = host
+        .default_output_device()
+        .expect("couldn't find default output device");
+    let config = device.default_output_config().unwrap();
+
     while let Some(evt) = client_event_rx.recv().await {
         match evt {
             EmittedEvents::CallInitiated { dest, sdp } => {
@@ -212,8 +228,72 @@ async fn handle_events(
                 let mut s = swrtc.lock().await;
                 s.hang_up(&peer).await;
             }
+            EmittedEvents::TrackAdded { peer, track } => {
+                log::debug!("event: TrackAdded");
+
+                // todo: use a mpsc channel for all tracks to forward their samples. need to include media type, peer_id, ect
+
+                // create a depacketizer based on the mime_type and pass it to a thread
+                let mime_type = track.codec().await.capability.mime_type;
+                match MimeType::from_string(&mime_type)? {
+                    MimeType::OPUS => {
+                        let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
+                        // todo: get the clock rate (and possibly max_late) from the codec capability
+                        let sample_builder = SampleBuilder::new(10, depacketizer, 7000);
+
+                        tokio::spawn(async move {
+                            if let Err(e) = decode_media_stream(track, sample_builder).await {
+                                log::error!("error decoding media stream: {}", e);
+                            }
+                        });
+                    }
+                    _ => {
+                        log::error!("unhandled mime type: {}", &mime_type);
+                        continue;
+                    }
+                };
+            }
             _ => {}
         }
     }
+    Ok(())
+}
+
+async fn decode_media_stream<T>(
+    track: Arc<TrackRemote>,
+    mut sample_builder: SampleBuilder<T>,
+) -> Result<()>
+where
+    T: Depacketizer,
+{
+    // read RTP packets, convert to samples, and send samples via channel
+    let mut b = [0u8; 1600];
+    loop {
+        match track.read(&mut b).await {
+            Ok((siz, _attr)) => {
+                // get RTP packet
+                let mut buf = &b[..siz];
+                // todo: possibly continue on error.
+                let mut rtp_packet = webrtc::rtp::packet::Packet::unmarshal(&mut buf)?;
+                // todo: set the payload_type
+                //rtp_packet.header.payload_type = ?;
+
+                // todo: send the RTP packet somewhere else if needed (such as something which is writing the media to an MP4 file)
+
+                // turn RTP packets into samples via SampleBuilder.push
+                sample_builder.push(rtp_packet);
+                // check if a sample can be created
+                if let Some(sample) = sample_builder.pop() {
+                    // todo: send the sample via a channel
+                    log::debug!("got sample");
+                }
+            }
+            Err(e) => {
+                log::warn!("closing track: {}", e);
+                break;
+            }
+        }
+    }
+
     Ok(())
 }

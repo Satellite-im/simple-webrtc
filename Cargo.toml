@@ -17,4 +17,4 @@ hyper = { version = "0.14", features = ["full"], optional = true }
 lazy_static = { version = "1.4.0", optional = true }
 
 [features]
-test-server = ["dep:hyper",  "dep:lazy_static"]
+test-server = ["dep:hyper", "dep:lazy_static"]

@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = { version = "1.0.66" } # this isn't added to the library yet: features = ["file-lines"]
+audiopus = "0.2.0"
 cpal = "0.14.2"
 chrono = "0.4.23"
 clap = { version = "4.0.23", features = ['derive'] }

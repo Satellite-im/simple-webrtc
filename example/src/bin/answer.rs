@@ -239,7 +239,8 @@ async fn handle_events(
                         let sample_builder = SampleBuilder::new(10, depacketizer, 7000);
 
                         tokio::spawn(async move {
-                            if let Err(e) = decode_media_stream(track, sample_builder).await {
+                            if let Err(e) = decode_media_stream(track.clone(), sample_builder).await
+                            {
                                 log::error!("error decoding media stream: {}", e);
                             }
                         });
@@ -276,13 +277,13 @@ where
     let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
         let mut input_fell_behind = false;
         for sample in data {
-            *sample = match consumer.pop() {
+            /*sample = match consumer.pop() {
                 Some(s) => s,
                 None => {
                     input_fell_behind = true;
                     0.0
                 }
-            };
+            };*/
         }
         if input_fell_behind {
             eprintln!("input stream fell behind: try increasing latency");
@@ -334,7 +335,6 @@ where
             }
         }
     };
-
     // todo: signal that an error occured
     tokio::select! {
         _ = process_rtp => {
@@ -344,8 +344,6 @@ where
             log::debug!("read_rtp stopped");
         }
     }
-
-    drop(output_stream);
 
     Ok(())
 }

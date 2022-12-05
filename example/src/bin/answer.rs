@@ -271,40 +271,32 @@ where
         .expect("couldn't find default output device");
     let config = output_device.default_output_config().unwrap();
 
-    let (rtp_tx, mut rtp_rx) = mpsc::unbounded_channel::<webrtc::rtp::packet::Packet>();
+    let (producer, mut consumer) = mpsc::unbounded_channel::<webrtc::media::Sample>();
 
     // read the raw data emitted by process_rtp
     let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
         let mut input_fell_behind = false;
         for sample in data {
-            /*sample = match consumer.pop() {
-                Some(s) => s,
-                None => {
+            *sample = match consumer.try_recv() {
+                Ok(s) => 0.0, //s.to_f32(),
+                Err(TryRecvError::Empty) => {
                     input_fell_behind = true;
                     0.0
                 }
-            };*/
+                Err(e) => {
+                    log::error!("channel closed: {}", e);
+                    0.0
+                }
+            }
         }
         if input_fell_behind {
-            eprintln!("input stream fell behind: try increasing latency");
+            log::error!("input stream fell behind: try increasing latency");
         }
     };
 
     let output_stream =
         output_device.build_output_stream(&config.into(), output_data_fn, err_fn)?;
     output_stream.play()?;
-
-    let process_rtp = async move {
-        while let Some(rtp_packet) = rtp_rx.recv().await {
-            // turn RTP packets into samples via SampleBuilder.push
-            sample_builder.push(rtp_packet);
-            // check if a sample can be created
-            while let Some(sample) = sample_builder.pop() {
-                // todo: send the sample via a channel. possibly send it as a f32
-                log::debug!("got sample");
-            }
-        }
-    };
 
     let read_rtp = async move {
         // read RTP packets, convert to samples, and send samples via channel
@@ -324,8 +316,12 @@ where
 
                     // todo: send the RTP packet somewhere else if needed (such as something which is writing the media to an MP4 file)
 
-                    if rtp_tx.send(rtp_packet).is_err() {
-                        break;
+                    // turn RTP packets into samples via SampleBuilder.push
+                    sample_builder.push(rtp_packet);
+                    // check if a sample can be created
+                    while let Some(sample) = sample_builder.pop() {
+                        producer.send(sample);
+                        log::debug!("got sample");
                     }
                 }
                 Err(e) => {
@@ -335,15 +331,8 @@ where
             }
         }
     };
-    // todo: signal that an error occured
-    tokio::select! {
-        _ = process_rtp => {
-            log::debug!("process_rtp stopped");
-        }
-        _ = read_rtp => {
-            log::debug!("read_rtp stopped");
-        }
-    }
+
+    read_rtp.await;
 
     Ok(())
 }

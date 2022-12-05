@@ -21,6 +21,8 @@ use webrtc::{
     track::track_remote::TrackRemote,
 };
 
+use example::*;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -181,11 +183,13 @@ async fn handle_signals(
 
 async fn handle_events(
     client_address: String,
-    _peer_address: String,
+    peer_address: String,
     swrtc: Arc<Mutex<Controller>>,
     mut client_event_rx: mpsc::UnboundedReceiver<EmittedEvents>,
 ) -> Result<()> {
     // want to send RTP packets to CPAL
+
+    let mut output_tracks = vec![];
 
     while let Some(evt) = client_event_rx.recv().await {
         match evt {
@@ -234,12 +238,18 @@ async fn handle_events(
                 let mime_type = track.codec().await.capability.mime_type;
                 match MimeType::from_string(&mime_type)? {
                     MimeType::OPUS => {
+                        let (producer, consumer) = mpsc::unbounded_channel::<f32>();
+                        let output_track = OutputTrack::init(peer.clone(), consumer)?;
+                        output_track.play()?;
+                        output_tracks.push(output_track);
+
                         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
                         // todo: get the clock rate (and possibly max_late) from the codec capability
                         let sample_builder = SampleBuilder::new(10, depacketizer, 7000);
 
                         tokio::spawn(async move {
-                            if let Err(e) = decode_media_stream(track.clone(), sample_builder).await
+                            if let Err(e) =
+                                decode_media_stream(track.clone(), sample_builder, producer).await
                             {
                                 log::error!("error decoding media stream: {}", e);
                             }
@@ -260,79 +270,44 @@ async fn handle_events(
 async fn decode_media_stream<T>(
     track: Arc<TrackRemote>,
     mut sample_builder: SampleBuilder<T>,
+    producer: mpsc::UnboundedSender<f32>,
 ) -> Result<()>
 where
     T: Depacketizer,
 {
-    let host = cpal::default_host();
-    // todo: allow switching the output device during the call.
-    let output_device: cpal::Device = host
-        .default_output_device()
-        .expect("couldn't find default output device");
-    let config = output_device.default_output_config().unwrap();
+    // read RTP packets, convert to samples, and send samples via channel
+    let mut b = [0u8; 1600];
+    loop {
+        match track.read(&mut b).await {
+            Ok((siz, _attr)) => {
+                // get RTP packet
+                let mut buf = &b[..siz];
+                // todo: possibly continue on error.
+                let rtp_packet = match webrtc::rtp::packet::Packet::unmarshal(&mut buf) {
+                    Ok(r) => r,
+                    Err(_) => break,
+                };
+                // todo: set the payload_type
+                //rtp_packet.header.payload_type = ?;
 
-    let (producer, mut consumer) = mpsc::unbounded_channel::<webrtc::media::Sample>();
+                // todo: send the RTP packet somewhere else if needed (such as something which is writing the media to an MP4 file)
 
-    // read the raw data emitted by process_rtp
-    let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-        let mut input_fell_behind = false;
-        for sample in data {
-            *sample = match consumer.try_recv() {
-                Ok(s) => 0.0, //s.to_f32(),
-                Err(TryRecvError::Empty) => {
-                    input_fell_behind = true;
-                    0.0
-                }
-                Err(e) => {
-                    log::error!("channel closed: {}", e);
-                    0.0
-                }
-            }
-        }
-        if input_fell_behind {
-            log::error!("input stream fell behind: try increasing latency");
-        }
-    };
-
-    let output_stream =
-        output_device.build_output_stream(&config.into(), output_data_fn, err_fn)?;
-    output_stream.play()?;
-
-    let read_rtp = async move {
-        // read RTP packets, convert to samples, and send samples via channel
-        let mut b = [0u8; 1600];
-        loop {
-            match track.read(&mut b).await {
-                Ok((siz, _attr)) => {
-                    // get RTP packet
-                    let mut buf = &b[..siz];
-                    // todo: possibly continue on error.
-                    let rtp_packet = match webrtc::rtp::packet::Packet::unmarshal(&mut buf) {
-                        Ok(r) => r,
-                        Err(_) => break,
-                    };
-                    // todo: set the payload_type
-                    //rtp_packet.header.payload_type = ?;
-
-                    // todo: send the RTP packet somewhere else if needed (such as something which is writing the media to an MP4 file)
-
-                    // turn RTP packets into samples via SampleBuilder.push
-                    sample_builder.push(rtp_packet);
-                    // check if a sample can be created
-                    while let Some(sample) = sample_builder.pop() {
-                        producer.send(sample);
-                        log::debug!("got sample");
-                    }
-                }
-                Err(e) => {
-                    log::warn!("closing track: {}", e);
-                    break;
+                // turn RTP packets into samples via SampleBuilder.push
+                sample_builder.push(rtp_packet);
+                // check if a sample can be created
+                while let Some(sample) = sample_builder.pop() {
+                    // todo: send to Opus decoder
+                    // todo: send raw samples to producer
+                    //producer.send(sample);
+                    log::debug!("got sample");
                 }
             }
+            Err(e) => {
+                log::warn!("closing track: {}", e);
+                break;
+            }
         }
-    };
-
-    read_rtp.await;
+    }
 
     Ok(())
 }

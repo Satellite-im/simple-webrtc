@@ -14,19 +14,19 @@ pub struct OutputTrack {
 
 impl OutputTrack {
     // should receive raw samples from `consumer`
-    pub fn init(peer_id: PeerId, mut consumer: mpsc::UnboundedReceiver<f32>) -> Result<Self> {
-        let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+    pub fn init(peer_id: PeerId, mut consumer: mpsc::UnboundedReceiver<i16>) -> Result<Self> {
+        let output_data_fn = move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
             let mut input_fell_behind = false;
             for sample in data {
                 *sample = match consumer.try_recv() {
-                    Ok(s) => 0.0, //s.to_f32(),
+                    Ok(s) => s,
                     Err(TryRecvError::Empty) => {
                         input_fell_behind = true;
-                        0.0
+                        0
                     }
                     Err(e) => {
                         log::error!("channel closed: {}", e);
-                        0.0
+                        0
                     }
                 }
             }

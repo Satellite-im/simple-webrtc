@@ -183,7 +183,7 @@ async fn handle_signals(
 
 async fn handle_events(
     client_address: String,
-    peer_address: String,
+    _peer_address: String,
     swrtc: Arc<Mutex<Controller>>,
     mut client_event_rx: mpsc::UnboundedReceiver<EmittedEvents>,
 ) -> Result<()> {
@@ -238,18 +238,25 @@ async fn handle_events(
                 let mime_type = track.codec().await.capability.mime_type;
                 match MimeType::from_string(&mime_type)? {
                     MimeType::OPUS => {
-                        let (producer, consumer) = mpsc::unbounded_channel::<f32>();
+                        let (producer, consumer) = mpsc::unbounded_channel::<i16>();
                         let output_track = OutputTrack::init(peer.clone(), consumer)?;
                         output_track.play()?;
                         output_tracks.push(output_track);
 
                         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
                         // todo: get the clock rate (and possibly max_late) from the codec capability
-                        let sample_builder = SampleBuilder::new(10, depacketizer, 7000);
+                        let sample_rate = 48000;
+                        let sample_builder =
+                            SampleBuilder::new(480, depacketizer, sample_rate as u32);
 
                         tokio::spawn(async move {
-                            if let Err(e) =
-                                decode_media_stream(track.clone(), sample_builder, producer).await
+                            if let Err(e) = decode_media_stream(
+                                track.clone(),
+                                sample_builder,
+                                producer,
+                                sample_rate,
+                            )
+                            .await
                             {
                                 log::error!("error decoding media stream: {}", e);
                             }
@@ -270,13 +277,16 @@ async fn handle_events(
 async fn decode_media_stream<T>(
     track: Arc<TrackRemote>,
     mut sample_builder: SampleBuilder<T>,
-    producer: mpsc::UnboundedSender<f32>,
+    producer: mpsc::UnboundedSender<i16>,
+    sample_rate: u32,
 ) -> Result<()>
 where
     T: Depacketizer,
 {
+    let mut decoder = opus::Decoder::new(sample_rate, opus::Channels::Mono)?;
+    let mut decoder_output_buf = [0; 4096];
     // read RTP packets, convert to samples, and send samples via channel
-    let mut b = [0u8; 1600];
+    let mut b = [0u8; 4096];
     loop {
         match track.read(&mut b).await {
             Ok((siz, _attr)) => {
@@ -285,7 +295,10 @@ where
                 // todo: possibly continue on error.
                 let rtp_packet = match webrtc::rtp::packet::Packet::unmarshal(&mut buf) {
                     Ok(r) => r,
-                    Err(_) => break,
+                    Err(e) => {
+                        log::error!("unmarshall rtp packet failed: {}", e);
+                        break;
+                    }
                 };
                 // todo: set the payload_type
                 //rtp_packet.header.payload_type = ?;
@@ -295,10 +308,22 @@ where
                 // turn RTP packets into samples via SampleBuilder.push
                 sample_builder.push(rtp_packet);
                 // check if a sample can be created
-                while let Some(sample) = sample_builder.pop() {
-                    // todo: send to Opus decoder
-                    // todo: send raw samples to producer
-                    //producer.send(sample);
+                while let Some(media_sample) = sample_builder.pop() {
+                    match decoder.decode(media_sample.data.as_ref(), &mut decoder_output_buf, false)
+                    {
+                        Ok(siz) => {
+                            let to_send = decoder_output_buf.iter().take(siz);
+                            for audio_sample in to_send {
+                                if let Err(e) = producer.send(*audio_sample) {
+                                    log::error!("failed to send sample: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("decode error: {}", e);
+                            continue;
+                        }
+                    }
                     log::debug!("got sample");
                 }
             }
@@ -308,10 +333,7 @@ where
             }
         }
     }
+    log::debug!("closing get_media_stream");
 
     Ok(())
-}
-
-fn err_fn(err: cpal::StreamError) {
-    log::error!("an error occurred on stream: {}", err);
 }

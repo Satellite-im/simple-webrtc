@@ -199,7 +199,7 @@ impl Controller {
         &mut self,
         source_id: MediaSourceId,
         codec: RTCRtpCodecCapability,
-    ) -> Result<Arc<dyn TrackLocalWriter>> {
+    ) -> Result<Arc<TrackLocalStaticRTP>> {
         // todo: don't allow adding duplicate source_ids
         let track = Arc::new(TrackLocalStaticRTP::new(
             codec,

@@ -1,17 +1,24 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use bytes::Bytes;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     PlayStreamError,
 };
 use rand::prelude::*;
 use simple_webrtc::PeerId;
-use tokio::sync::mpsc::{self, error::TryRecvError};
-use webrtc::rtp::{self};
+use tokio::sync::{
+    mpsc::{self, error::TryRecvError},
+    Mutex,
+};
 use webrtc::track::track_local::TrackLocalWriter;
+use webrtc::{
+    rtp::{self, packetizer::Packetizer},
+    track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
+};
 
-pub struct OpusPacketizer {
+pub struct OpusFramer {
     // encodes groups of samples (frames)
     encoder: opus::Encoder,
     // queues samples, to build a frame
@@ -19,24 +26,70 @@ pub struct OpusPacketizer {
     // used for the encoder
     opus_out: Vec<u8>,
     // number of samples in a frame
-    frame_size: u32,
-    packetizer: Box<dyn rtp::packetizer::Packetizer>,
+    frame_size: usize,
 }
 
-impl OpusPacketizer {
-    pub fn init(frame_size: u32, sample_rate: u32, channels: opus::Channels) -> Result<Self> {
-        let mut rng = rand::thread_rng();
-        let ssrc: u32 = rng.gen();
-
+impl OpusFramer {
+    pub fn init(frame_size: usize, sample_rate: u32, channels: opus::Channels) -> Result<Self> {
         let mut buf = Vec::new();
         buf.reserve(frame_size as usize);
         let mut opus_out = Vec::new();
-        opus_out.resize(frame_size as usize, 0);
+        opus_out.resize(frame_size, 0);
         let encoder = opus::Encoder::new(sample_rate, channels, opus::Application::Voip)?;
+
+        Ok(Self {
+            encoder,
+            raw_samples: buf,
+            opus_out,
+            frame_size,
+        })
+    }
+
+    pub fn frame(&mut self, sample: i16) -> Option<Bytes> {
+        self.raw_samples.push(sample);
+        if self.raw_samples.len() == self.frame_size {
+            match self.encoder.encode(
+                self.raw_samples.as_mut_slice(),
+                self.opus_out.as_mut_slice(),
+            ) {
+                Ok(size) => {
+                    self.raw_samples.clear();
+                    let slice = self.opus_out.as_slice();
+                    let bytes = bytes::Bytes::copy_from_slice(&slice[0..size]);
+                    Some(bytes)
+                }
+                Err(e) => {
+                    log::error!("OpusPacketizer failed to encode: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+}
+
+pub struct SourceTrack {
+    device: cpal::Device,
+    stream: cpal::Stream,
+    track: Arc<TrackLocalStaticRTP>,
+}
+
+impl SourceTrack {
+    pub fn init(
+        track: Arc<TrackLocalStaticRTP>,
+        sample_rate: u32,
+        channels: opus::Channels,
+    ) -> Result<Self> {
+        let (producer, mut consumer) = mpsc::unbounded_channel::<Bytes>();
+        let frame_size = 120;
+        let mut rng = rand::thread_rng();
+        let ssrc: u32 = rng.gen();
+        let mut framer = OpusFramer::init(frame_size, sample_rate, channels)?;
         let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
         let seq = Box::new(rtp::sequence::new_random_sequencer());
 
-        let packetizer = rtp::packetizer::new_packetizer(
+        let mut packetizer = rtp::packetizer::new_packetizer(
             // i16 is 2 bytes
             (frame_size * 2) as usize,
             // payload type means nothing
@@ -48,64 +101,31 @@ impl OpusPacketizer {
             seq,
             sample_rate,
         );
-        Ok(Self {
-            encoder,
-            raw_samples: buf,
-            opus_out,
-            frame_size,
-            packetizer: Box::new(packetizer),
-        })
-    }
 
-    pub async fn encode(&mut self, sample: i16) -> Vec<rtp::packet::Packet> {
-        self.raw_samples.push(sample);
-        if self.raw_samples.len() == self.frame_size as usize {
-            match self.encoder.encode(
-                self.raw_samples.as_mut_slice(),
-                self.opus_out.as_mut_slice(),
-            ) {
-                Ok(size) => {
-                    self.raw_samples.clear();
-                    let bytes = bytes::Bytes::copy_from_slice(self.opus_out.as_slice());
-                    match self.packetizer.packetize(&bytes, size as u32).await {
-                        Ok(packets) => packets,
-                        Err(e) => {
-                            log::error!("OpusPacketizer failed to packetize: {}", e);
-                            vec![]
+        let track2 = track.clone();
+        tokio::spawn(async move {
+            while let Some(bytes) = consumer.recv().await {
+                // todo: figure out how many samples were actually created
+                match packetizer.packetize(&bytes, frame_size as u32).await {
+                    Ok(packets) => {
+                        for packet in &packets {
+                            if let Err(e) = track2.write_rtp(packet).await {
+                                log::error!("failed to send RTP packet: {}", e);
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    log::error!("OpusPacketizer failed to encode: {}", e);
-                    vec![]
+                    Err(e) => {
+                        log::error!("failed to packetize for opus: {}", e);
+                    }
                 }
             }
-        } else {
-            vec![]
-        }
-    }
-}
-
-pub struct SourceTrack {
-    device: cpal::Device,
-    stream: cpal::Stream,
-    track: Arc<dyn TrackLocalWriter>,
-}
-
-impl SourceTrack {
-    pub fn init(
-        track: Arc<dyn TrackLocalWriter>,
-        sample_rate: u32,
-        channels: opus::Channels,
-    ) -> Result<Self> {
-        let (producer, mut consumer) = mpsc::unbounded_channel::<i16>();
-        let mut packetizer = OpusPacketizer::init(120, sample_rate, channels)?;
-
-        tokio::spawn(async move { while let Some(sample) = consumer.recv().await {} });
+        });
         let input_data_fn = move |data: &[i16], _: &cpal::InputCallbackInfo| {
             for sample in data {
-                if let Err(e) = producer.send(*sample) {
-                    log::error!("SourceTrack failed to send sample: {}", e);
+                if let Some(bytes) = framer.frame(*sample) {
+                    if let Err(e) = producer.send(bytes) {
+                        log::error!("SourceTrack failed to send sample: {}", e);
+                    }
                 }
             }
         };

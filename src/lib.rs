@@ -24,11 +24,11 @@ mod internal;
 use crate::internal::data_types::*;
 
 // public exports
+pub mod media;
 pub use internal::data_types::{MediaSourceId, MimeType, PeerId};
 pub use internal::events::EmittedEvents;
 pub use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::rtp_transceiver::rtp_sender::RTCRtpSender;
-use webrtc::track::track_local::TrackLocalWriter;
 
 #[cfg(feature = "test-server")]
 pub mod testing;
@@ -111,7 +111,7 @@ impl Controller {
     /// done with Controller. it will clean up all threads
     pub async fn deinit(&mut self) -> Result<()> {
         let peer_ids: Vec<PeerId> = self.peers.keys().cloned().collect();
-        for peer_id  in peer_ids {
+        for peer_id in peer_ids {
             self.hang_up(&peer_id).await;
         }
 

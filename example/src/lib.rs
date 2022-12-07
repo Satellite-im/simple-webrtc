@@ -7,8 +7,16 @@ use rand::prelude::*;
 use simple_webrtc::PeerId;
 use tokio::sync::mpsc::{self, error::TryRecvError};
 use webrtc::{
-    rtp::{self, packetizer::Packetizer},
-    track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
+    media::io::sample_builder::SampleBuilder,
+    rtp::{
+        self,
+        packetizer::{Depacketizer, Packetizer},
+    },
+    track::{
+        track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
+        track_remote::TrackRemote,
+    },
+    util::Unmarshal,
 };
 
 pub struct OpusFramer {
@@ -84,6 +92,8 @@ impl SourceTrack {
 
         let mut packetizer = rtp::packetizer::new_packetizer(
             // i16 is 2 bytes
+            // frame size is number of i16 samles
+            // 12 is for the header, though there may be an additional 4*csrc bytes in the header.
             (frame_size * 2 + 12) as usize,
             // payload type means nothing
             // https://en.wikipedia.org/wiki/RTP_payload_formats
@@ -157,7 +167,22 @@ pub struct SinkTrack {
 // todo: sample rate?
 impl SinkTrack {
     // should receive raw samples from `consumer`
-    pub fn init(peer_id: PeerId, mut consumer: mpsc::UnboundedReceiver<i16>) -> Result<Self> {
+    pub fn init(track: Arc<TrackRemote>, peer_id: PeerId, sample_rate: u32) -> Result<Self> {
+        // number of late samples allowed
+        let max_late = 480;
+        let (producer, mut consumer) = mpsc::unbounded_channel::<i16>();
+        let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
+        let sample_builder = SampleBuilder::new(max_late, depacketizer, sample_rate as u32);
+
+        tokio::spawn(async move {
+            if let Err(e) =
+                decode_media_stream(track.clone(), sample_builder, producer, sample_rate).await
+            {
+                log::error!("error decoding media stream: {}", e);
+            }
+            log::debug!("stopping decode_media_stream thread");
+        });
+
         let output_data_fn = move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
             let mut input_fell_behind = false;
             for sample in data {
@@ -212,4 +237,67 @@ impl SinkTrack {
 
 fn err_fn(err: cpal::StreamError) {
     log::error!("an error occurred on stream: {}", err);
+}
+
+// todo: put this in a different file
+async fn decode_media_stream<T>(
+    track: Arc<TrackRemote>,
+    mut sample_builder: SampleBuilder<T>,
+    producer: mpsc::UnboundedSender<i16>,
+    sample_rate: u32,
+) -> Result<()>
+where
+    T: Depacketizer,
+{
+    let mut decoder = opus::Decoder::new(sample_rate, opus::Channels::Mono)?;
+    let mut decoder_output_buf = [0; 4096];
+    // read RTP packets, convert to samples, and send samples via channel
+    let mut b = [0u8; 4096];
+    loop {
+        match track.read(&mut b).await {
+            Ok((siz, _attr)) => {
+                // get RTP packet
+                let mut buf = &b[..siz];
+                // todo: possibly continue on error.
+                let rtp_packet = match webrtc::rtp::packet::Packet::unmarshal(&mut buf) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        log::error!("unmarshall rtp packet failed: {}", e);
+                        break;
+                    }
+                };
+                // todo: set the payload_type
+                //rtp_packet.header.payload_type = ?;
+
+                // todo: send the RTP packet somewhere else if needed (such as something which is writing the media to an MP4 file)
+
+                // turn RTP packets into samples via SampleBuilder.push
+                sample_builder.push(rtp_packet);
+                // check if a sample can be created
+                while let Some(media_sample) = sample_builder.pop() {
+                    match decoder.decode(media_sample.data.as_ref(), &mut decoder_output_buf, false)
+                    {
+                        Ok(siz) => {
+                            let to_send = decoder_output_buf.iter().take(siz);
+                            for audio_sample in to_send {
+                                if let Err(e) = producer.send(*audio_sample) {
+                                    log::error!("failed to send sample: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("decode error: {}", e);
+                            continue;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("closing track: {}", e);
+                break;
+            }
+        }
+    }
+
+    Ok(())
 }

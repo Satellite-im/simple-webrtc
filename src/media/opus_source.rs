@@ -1,20 +1,18 @@
 use anyhow::{bail, Result};
 use bytes::Bytes;
 use cpal::traits::{DeviceTrait, StreamTrait};
-use opus::Channels;
+
 use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use webrtc::{
-    media::io::sample_builder::SampleBuilder,
     rtp::{
         self,
-        packetizer::{Depacketizer, Packetizer},
+        packetizer::{Packetizer},
     },
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
     track::{
         track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
-        track_remote::TrackRemote,
     },
 };
 
@@ -118,7 +116,7 @@ impl SourceTrack for OpusSource {
         Ok(())
     }
     // should not require RTP renegotiation
-    fn change_input_device(&mut self, input_device: cpal::Device) {
+    fn change_input_device(&mut self, _input_device: cpal::Device) {
         todo!()
     }
 }

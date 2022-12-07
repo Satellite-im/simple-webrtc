@@ -80,7 +80,7 @@ impl SinkTrack for OpusSink {
         }
         Ok(())
     }
-    fn change_output_device(&mut self, output_device: cpal::Device) {
+    fn change_output_device(&mut self, _output_device: cpal::Device) {
         todo!()
     }
 }

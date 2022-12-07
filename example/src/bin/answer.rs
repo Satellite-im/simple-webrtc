@@ -103,7 +103,7 @@ async fn run(
 async fn handle_swrtc(
     _client_address: String,
     _peer_address: String,
-    swrtc: Arc<Mutex<Controller>>,
+    _swrtc: Arc<Mutex<Controller>>,
 ) -> Result<()> {
     /*let sample_rate = 48000;
     let channels = opus::Channels::Mono;
@@ -248,7 +248,6 @@ async fn handle_events(
                     }
                 };
             }
-            _ => {}
         }
     }
     Ok(())

@@ -112,8 +112,8 @@ async fn handle_swrtc(
             "audio".into(),
             RTCRtpCodecCapability {
                 mime_type: MimeType::OPUS.to_string(),
-                clock_rate: sample_rate.clone(),
-                channels: channels.clone() as u16,
+                clock_rate: sample_rate,
+                channels: channels as u16,
                 ..Default::default()
             },
         )

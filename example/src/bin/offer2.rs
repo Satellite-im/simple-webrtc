@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
 use cpal::traits::HostTrait;
-use simple_webrtc::media::SourceTrack;
 use simple_webrtc::testing::*;
 use simple_webrtc::{Controller, EmittedEvents, MimeType, RTCRtpCodecCapability};
 use std::io::Write;

@@ -1,9 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use cpal::traits::HostTrait;
-use simple_webrtc::media::SinkTrack;
 use simple_webrtc::testing::*;
-use simple_webrtc::{Controller, EmittedEvents, MimeType};
+use simple_webrtc::{Controller, EmittedEvents};
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
@@ -104,7 +103,7 @@ async fn run(
 async fn handle_swrtc(
     _client_address: String,
     _peer_address: String,
-    swrtc: Arc<Mutex<Controller>>,
+    _swrtc: Arc<Mutex<Controller>>,
 ) -> Result<()> {
     /*let sample_rate = 48000;
     let channels = opus::Channels::Mono;
@@ -230,7 +229,7 @@ async fn handle_events(
                 let mut s = swrtc.lock().await;
                 s.hang_up(&peer).await;
             }
-            EmittedEvents::TrackAdded { peer, track } => {
+            EmittedEvents::TrackAdded { peer: _, track } => {
                 log::debug!("event: TrackAdded");
                 let host = cpal::default_host();
                 // todo: allow switching the output device during the call.
@@ -245,7 +244,6 @@ async fn handle_events(
                 sink_track.play()?;
                 sink_tracks.push(sink_track);
             }
-            _ => {}
         }
     }
     Ok(())

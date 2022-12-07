@@ -4,24 +4,24 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 
 use rand::Rng;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinHandle};
 use webrtc::{
-    rtp::{
-        self,
-        packetizer::{Packetizer},
-    },
+    rtp::{self, packetizer::Packetizer},
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
-    track::{
-        track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
-    },
+    track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
 };
 
 use super::SourceTrack;
 
 pub struct OpusSource {
-    track: Arc<TrackLocalStaticRTP>,
-    device: cpal::Device,
+    // holding on to the track in case the input device is changed. in that case a new track is needed.
+    _track: Arc<TrackLocalStaticRTP>,
+    // may not need this but am saving it here because it's related to the `stream`, which needs to be kept in scope.
+    _device: cpal::Device,
+    // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
+    // used to cancel the current packetizer when the input device is changed.
+    _packetizer_handle: JoinHandle<()>,
 }
 
 impl SourceTrack for OpusSource {
@@ -70,7 +70,7 @@ impl SourceTrack for OpusSource {
 
         // todo: when the input device changes, this needs to change too.
         let track2 = track.clone();
-        tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             while let Some(bytes) = consumer.recv().await {
                 // todo: figure out how many samples were actually created
                 match packetizer.packetize(&bytes, frame_size as u32).await {
@@ -103,9 +103,10 @@ impl SourceTrack for OpusSource {
             input_device.build_input_stream(&config.into(), input_data_fn, err_fn)?;
 
         Ok(Self {
-            track,
-            device: input_device,
+            _track: track,
+            _device: input_device,
             stream: input_stream,
+            _packetizer_handle: join_handle,
         })
     }
 

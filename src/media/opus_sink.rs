@@ -1,7 +1,10 @@
 use anyhow::{bail, Result};
 use cpal::traits::{DeviceTrait, StreamTrait};
 use std::sync::Arc;
-use tokio::sync::mpsc::{self, error::TryRecvError};
+use tokio::{
+    sync::mpsc::{self, error::TryRecvError},
+    task::JoinHandle,
+};
 use webrtc::{
     media::io::sample_builder::SampleBuilder, rtp::packetizer::Depacketizer,
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability, track::track_remote::TrackRemote,
@@ -10,8 +13,18 @@ use webrtc::{
 
 use crate::media::SinkTrack;
 pub struct OpusSink {
-    device: cpal::Device,
+    // may not need this but am saving it here because it's related to the `stream`, which needs to be kept in scope.
+    _device: cpal::Device,
+    // want to keep this from getting dropped so it will continue to be read from
     stream: cpal::Stream,
+    decoder_handle: JoinHandle<()>,
+}
+
+impl Drop for OpusSink {
+    fn drop(&mut self) {
+        // this is a failsafe in case the caller doesn't close the associated TrackRemote
+        self.decoder_handle.abort();
+    }
 }
 
 // todo: ensure no zombie threads
@@ -35,11 +48,8 @@ impl SinkTrack for OpusSink {
         let (producer, mut consumer) = mpsc::unbounded_channel::<i16>();
         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
         let sample_builder = SampleBuilder::new(max_late, depacketizer, sample_rate as u32);
-
-        let _join_handle = tokio::spawn(async move {
-            if let Err(e) =
-                decode_media_stream(track.clone(), sample_builder, producer, decoder).await
-            {
+        let join_handle = tokio::spawn(async move {
+            if let Err(e) = decode_media_stream(track, sample_builder, producer, decoder).await {
                 log::error!("error decoding media stream: {}", e);
             }
             log::debug!("stopping decode_media_stream thread");
@@ -70,8 +80,9 @@ impl SinkTrack for OpusSink {
             output_device.build_output_stream(&config.into(), output_data_fn, err_fn)?;
 
         Ok(Self {
-            device: output_device,
+            _device: output_device,
             stream: output_stream,
+            decoder_handle: join_handle,
         })
     }
 

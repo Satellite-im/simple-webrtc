@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use cpal::traits::HostTrait;
-use example::*;
+use simple_webrtc::media::SinkTrack;
 use simple_webrtc::testing::*;
 use simple_webrtc::{Controller, EmittedEvents, MimeType};
 use std::io::Write;
@@ -241,6 +241,7 @@ async fn handle_events(
                 let codec = track.codec().await.capability;
                 let sink_track =
                     simple_webrtc::media::create_sink_track(output_device, track, codec)?;
+                //simple_webrtc::media::OpusSink::init(output_device, track, codec)?;
                 sink_track.play()?;
                 sink_tracks.push(sink_track);
             }

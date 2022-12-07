@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use cpal::traits::HostTrait;
-use example::SourceTrack;
+use simple_webrtc::media::SourceTrack;
 use simple_webrtc::testing::*;
 use simple_webrtc::{Controller, EmittedEvents, MimeType, RTCRtpCodecCapability};
 use std::io::Write;
@@ -101,7 +101,7 @@ async fn run(
 // swrtc = Simple WebRTC
 async fn handle_swrtc(
     _client_address: String,
-    _peer_address: String,
+    peer_address: String,
     swrtc: Arc<Mutex<Controller>>,
 ) -> Result<()> {
     let host = cpal::default_host();
@@ -124,7 +124,13 @@ async fn handle_swrtc(
     };
 
     // create an audio source
-    let source_track = simple_webrtc::media::create_source_track(input_device, track, codec)?;
+    let source_track = //simple_webrtc::media::OpusSource::init(input_device, track, codec)?;
+     simple_webrtc::media::create_source_track(input_device, track, codec)?;
+
+    {
+        let mut s = swrtc.lock().await;
+        s.dial(&peer_address).await?;
+    }
 
     source_track.play()?;
 

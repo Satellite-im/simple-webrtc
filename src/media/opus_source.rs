@@ -1,12 +1,127 @@
 use anyhow::{bail, Result};
 use bytes::Bytes;
+use cpal::traits::{DeviceTrait, StreamTrait};
 use opus::Channels;
+use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use webrtc::{
-    media::io::sample_builder::SampleBuilder, rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
-    track::track_remote::TrackRemote,
+    media::io::sample_builder::SampleBuilder,
+    rtp::{
+        self,
+        packetizer::{Depacketizer, Packetizer},
+    },
+    rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
+    track::{
+        track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
+        track_remote::TrackRemote,
+    },
 };
+
+use super::SourceTrack;
+
+pub struct OpusSource {
+    track: Arc<TrackLocalStaticRTP>,
+    device: cpal::Device,
+    stream: cpal::Stream,
+}
+
+impl SourceTrack for OpusSource {
+    fn init(
+        input_device: cpal::Device,
+        track: Arc<TrackLocalStaticRTP>,
+        codec: RTCRtpCodecCapability,
+    ) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        // number of samples to send in a RTP packet
+        let frame_size = 120;
+        let sample_rate = codec.clock_rate;
+        let channels = match codec.channels {
+            1 => opus::Channels::Mono,
+            2 => opus::Channels::Stereo,
+            _ => bail!("invalid number of channels"),
+        };
+
+        // create the ssrc for the RTP packets. ssrc serves to uniquely identify the sender
+        let mut rng = rand::thread_rng();
+        let ssrc: u32 = rng.gen();
+
+        let (producer, mut consumer) = mpsc::unbounded_channel::<Bytes>();
+
+        let mut framer = OpusFramer::init(frame_size, sample_rate, channels)?;
+        let opus = Box::new(rtp::codecs::opus::OpusPayloader {});
+        let seq = Box::new(rtp::sequence::new_random_sequencer());
+
+        let mut packetizer = rtp::packetizer::new_packetizer(
+            // i16 is 2 bytes
+            // frame size is number of i16 samles
+            // 12 is for the header, though there may be an additional 4*csrc bytes in the header.
+            (frame_size * 2 + 12) as usize,
+            // payload type means nothing
+            // https://en.wikipedia.org/wiki/RTP_payload_formats
+            // todo: use an enum for this
+            98,
+            // randomly generated and uniquely identifies the source
+            ssrc,
+            opus,
+            seq,
+            sample_rate,
+        );
+
+        // todo: when the input device changes, this needs to change too.
+        let track2 = track.clone();
+        tokio::spawn(async move {
+            while let Some(bytes) = consumer.recv().await {
+                // todo: figure out how many samples were actually created
+                match packetizer.packetize(&bytes, frame_size as u32).await {
+                    Ok(packets) => {
+                        for packet in &packets {
+                            if let Err(e) = track2.write_rtp(packet).await {
+                                log::error!("failed to send RTP packet: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("failed to packetize for opus: {}", e);
+                    }
+                }
+            }
+            log::debug!("SourceTrack packetizer thread quitting");
+        });
+        let input_data_fn = move |data: &[i16], _: &cpal::InputCallbackInfo| {
+            for sample in data {
+                if let Some(bytes) = framer.frame(*sample) {
+                    if let Err(e) = producer.send(bytes) {
+                        log::error!("SourceTrack failed to send sample: {}", e);
+                    }
+                }
+            }
+        };
+
+        let config = input_device.default_input_config().unwrap();
+        let input_stream =
+            input_device.build_input_stream(&config.into(), input_data_fn, err_fn)?;
+
+        Ok(Self {
+            track,
+            device: input_device,
+            stream: input_stream,
+        })
+    }
+
+    fn play(&self) -> Result<()> {
+        if let Err(e) = self.stream.play() {
+            return Err(e.into());
+        }
+        Ok(())
+    }
+    // should not require RTP renegotiation
+    fn change_input_device(&mut self, input_device: cpal::Device) {
+        todo!()
+    }
+}
 
 pub struct OpusFramer {
     // encodes groups of samples (frames)
@@ -57,4 +172,8 @@ impl OpusFramer {
             None
         }
     }
+}
+
+fn err_fn(err: cpal::StreamError) {
+    log::error!("an error occurred on stream: {}", err);
 }

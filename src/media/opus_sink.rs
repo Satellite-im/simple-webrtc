@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use cpal::traits::DeviceTrait;
+use cpal::traits::{DeviceTrait, StreamTrait};
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, error::TryRecvError};
 use webrtc::{
@@ -74,8 +74,11 @@ impl SinkTrack for OpusSink {
         })
     }
 
-    fn play(&self) {
-        todo!()
+    fn play(&self) -> Result<()> {
+        if let Err(e) = self.stream.play() {
+            return Err(e.into());
+        }
+        Ok(())
     }
     fn change_output_device(&mut self, output_device: cpal::Device) {
         todo!()

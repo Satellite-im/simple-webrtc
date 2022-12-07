@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use cpal::traits::HostTrait;
 use example::*;
 use simple_webrtc::testing::*;
 use simple_webrtc::{Controller, EmittedEvents, MimeType};
@@ -231,22 +232,17 @@ async fn handle_events(
             }
             EmittedEvents::TrackAdded { peer, track } => {
                 log::debug!("event: TrackAdded");
-
+                let host = cpal::default_host();
+                // todo: allow switching the output device during the call.
+                let output_device: cpal::Device = host
+                    .default_output_device()
+                    .expect("couldn't find default output device");
                 // create a depacketizer based on the mime_type and pass it to a thread
-                let codec = track.codec().await;
-                let mime_type = track.codec().await.capability.mime_type;
-                match MimeType::from_string(&mime_type)? {
-                    MimeType::OPUS => {
-                        let sink_track =
-                            SinkTrack::init(track, peer.clone(), codec.capability.clock_rate)?;
-                        sink_track.play()?;
-                        sink_tracks.push(sink_track);
-                    }
-                    _ => {
-                        log::error!("unhandled mime type: {}", &mime_type);
-                        continue;
-                    }
-                };
+                let codec = track.codec().await.capability;
+                let sink_track =
+                    simple_webrtc::media::create_sink_track(output_device, track, codec)?;
+                sink_track.play()?;
+                sink_tracks.push(sink_track);
             }
             _ => {}
         }

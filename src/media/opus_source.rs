@@ -6,14 +6,9 @@ use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use webrtc::{
-    rtp::{
-        self,
-        packetizer::{Packetizer},
-    },
+    rtp::{self, packetizer::Packetizer},
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
-    track::{
-        track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
-    },
+    track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
 };
 
 use super::SourceTrack;

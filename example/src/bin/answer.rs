@@ -338,7 +338,6 @@ where
                             continue;
                         }
                     }
-                    log::debug!("got sample");
                 }
             }
             Err(e) => {

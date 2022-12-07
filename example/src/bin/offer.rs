@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::Parser;
-use cpal::traits::HostTrait;
 use example::SourceTrack;
 use simple_webrtc::testing::*;
 use simple_webrtc::{Controller, EmittedEvents, MimeType, RTCRtpCodecCapability};
@@ -101,30 +100,33 @@ async fn run(
 // swrtc = Simple WebRTC
 async fn handle_swrtc(
     _client_address: String,
-    _peer_address: String,
+    peer_address: String,
     swrtc: Arc<Mutex<Controller>>,
 ) -> Result<()> {
-    let host = cpal::default_host();
-    // todo: allow switching the input device during the call.
-    let input_device: cpal::Device = host
-        .default_input_device()
-        .expect("couldn't find default input device");
-
-    let codec = RTCRtpCodecCapability {
-        mime_type: MimeType::OPUS.to_string(),
-        clock_rate: 48000,
-        channels: opus::Channels::Mono as u16,
-        ..Default::default()
-    };
+    let sample_rate = 48000;
+    let channels = opus::Channels::Mono;
     let track = {
         let mut s = swrtc.lock().await;
-
         // a media source must be added before attempting to connect or SDP will fail
-        s.add_media_source("audio".into(), codec.clone()).await?
+        s.add_media_source(
+            "audio".into(),
+            RTCRtpCodecCapability {
+                mime_type: MimeType::OPUS.to_string(),
+                clock_rate: sample_rate.clone(),
+                channels: channels.clone() as u16,
+                ..Default::default()
+            },
+        )
+        .await?
     };
 
     // create an audio source
-    let source_track = simple_webrtc::media::create_source_track(input_device, track, codec)?;
+    let source_track = SourceTrack::init(track, sample_rate, channels)?;
+
+    {
+        let mut s = swrtc.lock().await;
+        s.dial(&peer_address).await?;
+    }
 
     source_track.play()?;
 

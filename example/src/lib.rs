@@ -2,20 +2,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bytes::Bytes;
-use cpal::{
-    traits::{DeviceTrait, HostTrait, StreamTrait},
-    PlayStreamError,
-};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rand::prelude::*;
 use simple_webrtc::PeerId;
-use tokio::sync::{
-    mpsc::{self, error::TryRecvError},
-    Mutex,
-};
-use webrtc::track::track_local::TrackLocalWriter;
+use tokio::sync::mpsc::{self, error::TryRecvError};
 use webrtc::{
     rtp::{self, packetizer::Packetizer},
-    track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
+    track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocalWriter},
 };
 
 pub struct OpusFramer {
@@ -91,7 +84,7 @@ impl SourceTrack {
 
         let mut packetizer = rtp::packetizer::new_packetizer(
             // i16 is 2 bytes
-            (frame_size * 2) as usize,
+            (frame_size * 2 + 12) as usize,
             // payload type means nothing
             // https://en.wikipedia.org/wiki/RTP_payload_formats
             98,
@@ -119,6 +112,7 @@ impl SourceTrack {
                     }
                 }
             }
+            log::debug!("SourceTrack packetizer thread quitting");
         });
         let input_data_fn = move |data: &[i16], _: &cpal::InputCallbackInfo| {
             for sample in data {
@@ -144,6 +138,13 @@ impl SourceTrack {
             device: input_device,
             stream: input_stream,
         })
+    }
+
+    pub fn play(&self) -> Result<()> {
+        if let Err(e) = self.stream.play() {
+            return Err(e.into());
+        }
+        Ok(())
     }
 }
 

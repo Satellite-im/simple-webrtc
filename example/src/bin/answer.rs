@@ -119,7 +119,7 @@ async fn handle_swrtc(
     _peer_address: String,
     swrtc: Arc<Mutex<Controller>>,
 ) -> Result<()> {
-    let sample_rate = 48000;
+    /*let sample_rate = 48000;
     let channels = opus::Channels::Mono;
     // get a track to send audio
     let track = {
@@ -139,6 +139,7 @@ async fn handle_swrtc(
 
     // create an audio source
     let source_track = SourceTrack::init(track, sample_rate, channels)?;
+    source_track.play()?;*/
 
     loop {
         sleep(Duration::from_millis(1000)).await;
@@ -200,7 +201,7 @@ async fn handle_events(
 ) -> Result<()> {
     // want to send RTP packets to CPAL
 
-    let mut output_tracks = vec![];
+    let mut sink_tracks = vec![];
 
     while let Some(evt) = client_event_rx.recv().await {
         match evt {
@@ -250,9 +251,9 @@ async fn handle_events(
                 match MimeType::from_string(&mime_type)? {
                     MimeType::OPUS => {
                         let (producer, consumer) = mpsc::unbounded_channel::<i16>();
-                        let output_track = SinkTrack::init(peer.clone(), consumer)?;
-                        output_track.play()?;
-                        output_tracks.push(output_track);
+                        let sink_track = SinkTrack::init(peer.clone(), consumer)?;
+                        sink_track.play()?;
+                        sink_tracks.push(sink_track);
 
                         let depacketizer = webrtc::rtp::codecs::opus::OpusPacket::default();
                         // todo: get the clock rate (and possibly max_late) from the codec capability
@@ -271,6 +272,7 @@ async fn handle_events(
                             {
                                 log::error!("error decoding media stream: {}", e);
                             }
+                            log::debug!("stopping decode_media_stream thread");
                         });
                     }
                     _ => {
@@ -345,7 +347,6 @@ where
             }
         }
     }
-    log::debug!("closing get_media_stream");
 
     Ok(())
 }

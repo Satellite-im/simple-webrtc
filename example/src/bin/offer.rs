@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use example::SourceTrack;
 use simple_webrtc::testing::*;
 use simple_webrtc::{Controller, EmittedEvents, MimeType, RTCRtpCodecCapability};
 use std::io::Write;
@@ -102,20 +103,32 @@ async fn handle_swrtc(
     peer_address: String,
     swrtc: Arc<Mutex<Controller>>,
 ) -> Result<()> {
-    {
+    let sample_rate = 48000;
+    let channels = opus::Channels::Mono;
+    let track = {
         let mut s = swrtc.lock().await;
         // a media source must be added before attempting to connect or SDP will fail
-        let track_writer = s
-            .add_media_source(
-                "audio".into(),
-                RTCRtpCodecCapability {
-                    mime_type: MimeType::OPUS.to_string(),
-                    ..Default::default()
-                },
-            )
-            .await?;
+        s.add_media_source(
+            "audio".into(),
+            RTCRtpCodecCapability {
+                mime_type: MimeType::OPUS.to_string(),
+                clock_rate: sample_rate.clone(),
+                channels: channels.clone() as u16,
+                ..Default::default()
+            },
+        )
+        .await?
+    };
+
+    // create an audio source
+    let source_track = SourceTrack::init(track, sample_rate, channels)?;
+
+    {
+        let mut s = swrtc.lock().await;
         s.dial(&peer_address).await?;
     }
+
+    source_track.play()?;
 
     loop {
         sleep(Duration::from_millis(1000)).await;

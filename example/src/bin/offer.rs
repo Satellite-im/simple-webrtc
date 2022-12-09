@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use example::SourceTrack;
+use cpal::traits::HostTrait;
 use simple_webrtc::testing::*;
 use simple_webrtc::{Controller, EmittedEvents, MimeType, RTCRtpCodecCapability};
 use std::io::Write;
@@ -103,25 +103,28 @@ async fn handle_swrtc(
     peer_address: String,
     swrtc: Arc<Mutex<Controller>>,
 ) -> Result<()> {
-    let sample_rate = 48000;
-    let channels = opus::Channels::Mono;
+    let host = cpal::default_host();
+    // todo: allow switching the input device during the call.
+    let input_device: cpal::Device = host
+        .default_input_device()
+        .expect("couldn't find default input device");
+
+    let codec = RTCRtpCodecCapability {
+        mime_type: MimeType::OPUS.to_string(),
+        clock_rate: 48000,
+        channels: opus::Channels::Mono as u16,
+        ..Default::default()
+    };
     let track = {
         let mut s = swrtc.lock().await;
+
         // a media source must be added before attempting to connect or SDP will fail
-        s.add_media_source(
-            "audio".into(),
-            RTCRtpCodecCapability {
-                mime_type: MimeType::OPUS.to_string(),
-                clock_rate: sample_rate,
-                channels: channels as u16,
-                ..Default::default()
-            },
-        )
-        .await?
+        s.add_media_source("audio".into(), codec.clone()).await?
     };
 
     // create an audio source
-    let source_track = SourceTrack::init(track, sample_rate, channels)?;
+    let source_track = //simple_webrtc::media::OpusSource::init(input_device, track, codec)?;
+     simple_webrtc::media::create_source_track(input_device, track, codec)?;
 
     {
         let mut s = swrtc.lock().await;

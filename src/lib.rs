@@ -23,6 +23,8 @@ mod internal;
 
 use crate::internal::data_types::*;
 
+pub mod scratch;
+
 // public exports
 pub mod media;
 pub use internal::data_types::{MediaSourceId, MimeType, PeerId};
@@ -226,6 +228,7 @@ impl Controller {
                         tokio::spawn(async move {
                             let mut rtcp_buf = vec![0u8; 1500];
                             while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+                            log::debug!("terminating rtp_sender thread from add_media_source");
                             Result::<()>::Ok(())
                         });
                     }
@@ -341,18 +344,15 @@ impl Controller {
         let tx = self.emitted_event_chan.clone();
         let dest = peer_id.clone();
         peer_connection.on_ice_candidate(Box::new(move |c: Option<RTCIceCandidate>| {
-            let tx = tx.clone();
-            let dest = dest.clone();
-            Box::pin(async move {
-                if let Some(candidate) = c {
-                    if let Err(e) = tx.send(EmittedEvents::Ice {
-                        dest: dest.clone(),
-                        candidate: Box::new(candidate),
-                    }) {
-                        log::error!("failed to send ice candidate to peer {}: {}", &dest, e);
-                    }
+            if let Some(candidate) = c {
+                if let Err(e) = tx.send(EmittedEvents::Ice {
+                    dest: dest.clone(),
+                    candidate: Box::new(candidate),
+                }) {
+                    log::error!("failed to send ice candidate to peer {}: {}", &dest, e);
                 }
-            })
+            }
+            Box::pin(async {})
         }));
 
         // Set the handler for ICE connection state
@@ -362,8 +362,6 @@ impl Controller {
         let dest = peer_id.clone();
         peer_connection.on_ice_connection_state_change(Box::new(
             move |connection_state: RTCIceConnectionState| {
-                let tx = tx.clone();
-                let dest = dest.clone();
                 log::info!(
                     "Connection State for peer {} has changed {}",
                     &dest,
@@ -384,8 +382,6 @@ impl Controller {
         let dest = peer_id.clone();
         peer_connection.on_track(Box::new(
             move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
-                let tx = tx.clone();
-                let dest = dest.clone();
                 if let Some(track) = track {
                     if let Err(e) = tx.send(EmittedEvents::TrackAdded {
                         peer: dest.clone(),
@@ -410,6 +406,7 @@ impl Controller {
                     tokio::spawn(async move {
                         let mut rtcp_buf = vec![0u8; 1500];
                         while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+                        log::debug!("terminating rtp_sender thread from `connect`");
                         Result::<()>::Ok(())
                     });
                 }

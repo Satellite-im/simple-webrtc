@@ -23,7 +23,8 @@ mod internal;
 
 use crate::internal::data_types::*;
 
-pub mod scratch;
+mod scratch;
+mod scratch2;
 
 // public exports
 pub mod media;

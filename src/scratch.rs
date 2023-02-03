@@ -52,12 +52,13 @@ pub mod web_rtc {
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
+    pub type MediaSourceId = uuid::Uuid;
+
     /// Handles WebRTC functions. Relies on an external
     /// module for transmitting the signals (dial, accept_call, etc)
     #[async_trait]
     pub trait Controller {
         type PeerId;
-        type MediaSourceId;
         type LocalTrack;
         type RemoteTrack;
         type Codec;
@@ -81,7 +82,7 @@ pub mod web_rtc {
             source_id: Self::PeerId,
             codec: Self::Codec,
         ) -> Result<Arc<Self::LocalTrack>>;
-        async fn remove_media_source(&mut self, source_id: Self::MediaSourceId) -> Result<()>;
+        async fn remove_media_source(&mut self, source_id: MediaSourceId) -> Result<()>;
         async fn recv_ice(
             &mut self,
             peer_id: Self::PeerId,

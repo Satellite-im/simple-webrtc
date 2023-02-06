@@ -4,6 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use mime_types::*;
 
+// same codec is used for camera and ScreenShare
+pub enum MediaType {
+    Microphone,
+    Camera,
+    ScreenShare,
+}
+
 pub struct MediaCodec {
     mime: MimeType,
     clock_rate: u32,

@@ -1,5 +1,6 @@
 use anyhow::{bail, Result};
 use derive_more::Display;
+use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
 use mime_types::*;
@@ -20,7 +21,7 @@ pub type CallId = uuid::Uuid;
 // todo: add functions for screen sharing
 pub trait Blink {
     // ------ Misc ------
-    //fn get_event_stream(&mut self) -> BlinkEvents;
+    fn get_event_stream(&mut self) -> Result<BlinkEventStream>;
 
     // ------ Create/Join a call ------
 
@@ -41,11 +42,11 @@ pub trait Blink {
 
     // ------ Select input/output devices ------
 
-    fn get_available_microphones(&self) -> Vec<String>;
+    fn get_available_microphones(&self) -> Result<Vec<String>>;
     fn select_microphone(&mut self, device_name: &str);
-    fn get_available_speakers(&self) -> Vec<String>;
+    fn get_available_speakers(&self) -> Result<Vec<String>>;
     fn select_speaker(&mut self, device_name: &str);
-    fn get_available_cameras(&self) -> Vec<String>;
+    fn get_available_cameras(&self) -> Result<Vec<String>>;
     fn select_camera(&mut self, device_name: &str);
 
     // ------ Media controls ------
@@ -58,12 +59,7 @@ pub trait Blink {
     fn stop_recording(&mut self);
 }
 
-pub struct Peer {
-    peer_id: Uuid,
-    display_name: String,
-}
-
-pub enum BlinkEvents {
+pub enum BlinkEventKind {
     IncomingCall { call_id: CallId },
     CallAccepted { call_id: CallId },
     // not sure if this is needed
@@ -91,6 +87,26 @@ pub struct MediaCodec {
     mime: MimeType,
     clock_rate: u32,
     channels: u8,
+}
+
+pub struct Peer {
+    peer_id: Uuid,
+    display_name: String,
+}
+
+pub struct BlinkEventStream(pub BoxStream<'static, BlinkEventKind>);
+
+impl core::ops::Deref for BlinkEventStream {
+    type Target = BoxStream<'static, BlinkEventKind>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for BlinkEventStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 #[allow(clippy::upper_case_acronyms)]

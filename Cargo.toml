@@ -9,6 +9,7 @@ async-trait = "0.1.64"
 bytes = "1"
 cpal = "0.14.2"
 derive_more = "0.99.17"
+futures = { version = "0.3" }
 log = "0.4.17"
 opus = "0.3.0"
 uuid = "1.2.2"

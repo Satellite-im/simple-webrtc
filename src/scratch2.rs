@@ -1,5 +1,6 @@
 // this is really raygun::Conversation
 type Conversation = ();
+
 pub type StreamId = uuid::Uuid;
 // the call id is the same as raygun::Conversation::id()
 pub type CallId = uuid::Uuid;
@@ -7,6 +8,9 @@ pub trait Blink {
     type PeerId;
     type AudioConfig;
     type VideoConfig;
+
+    // Create/Join a call
+
     // only one call can be offered at a time.
     // cannot offer a call if another call is in progress
     fn offer_call(
@@ -21,6 +25,9 @@ pub trait Blink {
     fn reject_call(&mut self, call_id: CallId);
     // end/leave the current call
     fn leave_call(&mut self);
+
+    // Communicate during a call
+
     // create a source track
     fn publish_stream(&mut self, stream_config: MediaStreamConfig);
     // tell the remote side to forward their stream to you
@@ -32,6 +39,16 @@ pub trait Blink {
     fn close_stream(&mut self, stream_id: StreamId);
     // when joining a call late, used to interrogate each peer about their published streams
     fn query_published_streams(&mut self, peer_id: Self::PeerId);
+
+    // select input/output devices
+
+    fn get_available_microphones(&self) -> Vec<String>;
+    fn select_microphone(&mut self, device_name: &str);
+    fn get_available_speakers(&self) -> Vec<String>;
+    fn select_speaker(&mut self, device_name: &str);
+    fn get_available_cameras(&self) -> Vec<String>;
+    fn select_camera(&mut self, device_name: &str);
+    // todo: function for screen sharing
 }
 
 // used internally by the Blink implementation

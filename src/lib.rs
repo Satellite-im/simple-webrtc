@@ -23,10 +23,7 @@ mod internal;
 
 use crate::internal::data_types::*;
 
-mod scratch;
-mod scratch2;
-mod scratch3;
-mod scratch4;
+mod blink;
 
 // public exports
 pub mod media;

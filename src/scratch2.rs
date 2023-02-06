@@ -14,6 +14,9 @@ pub type CallId = uuid::Uuid;
 //
 // todo: add functions for screen sharing
 pub trait Blink {
+    // ------ Misc ------
+    //fn get_event_stream(&mut self) -> BlinkEvents;
+
     // ------ Create/Join a call ------
 
     // only one call can be offered at a time.
@@ -46,6 +49,8 @@ pub trait Blink {
     fn unmute_self(&mut self);
     fn enable_camera(&mut self);
     fn disable_camera(&mut self);
+    fn record_call(&mut self, output_file: &str);
+    fn stop_recording(&mut self);
 }
 
 pub struct CallConfig {

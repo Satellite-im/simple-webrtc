@@ -14,9 +14,7 @@ pub type CallId = uuid::Uuid;
 //
 // todo: add functions for screen sharing
 pub trait Blink {
-    type PeerId;
-
-    // Create/Join a call
+    // ------ Create/Join a call ------
 
     // only one call can be offered at a time.
     // cannot offer a call if another call is in progress
@@ -33,21 +31,7 @@ pub trait Blink {
     // end/leave the current call
     fn leave_call(&mut self);
 
-    // Communicate during a call
-
-    // create a source track
-    fn publish_stream(&mut self, media_type: MediaType);
-    // tell the remote side to forward their stream to you
-    // a webrtc connection will start in response to this
-    fn subscribe_stream(&mut self, peer_id: Self::PeerId, stream_id: StreamId);
-    // stop offering the stream and close existing connections to it
-    fn unpublish_stream(&mut self, stream_id: StreamId);
-    // called by the remote side
-    fn close_stream(&mut self, stream_id: StreamId);
-    // when joining a call late, used to interrogate each peer about their published streams
-    fn query_published_streams(&mut self, peer_id: Self::PeerId);
-
-    // select input/output devices
+    // ------ Select input/output devices ------
 
     fn get_available_microphones(&self) -> Vec<String>;
     fn select_microphone(&mut self, device_name: &str);
@@ -55,6 +39,13 @@ pub trait Blink {
     fn select_speaker(&mut self, device_name: &str);
     fn get_available_cameras(&self) -> Vec<String>;
     fn select_camera(&mut self, device_name: &str);
+
+    // ------ Media controls ------
+
+    fn mute_self(&mut self);
+    fn unmute_self(&mut self);
+    fn enable_camera(&mut self);
+    fn disable_camera(&mut self);
 }
 
 pub struct CallConfig {
